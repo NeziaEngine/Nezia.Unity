@@ -1,8 +1,8 @@
 {
   "name": "jp.nezia.unity",
   "version": "0.1.0",
-  "displayName": "Nezia Unity",
-  "description": "Nezia Unity 共通基盤パッケージ。",
+  "displayName": "Nezia Sound Engine",
+  "description": "Nezia Sound Engine。",
   "unity": "2022.3",
   "author": {
     "name": "Nezia",

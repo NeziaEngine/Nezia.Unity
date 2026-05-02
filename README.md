@@ -1,6 +1,6 @@
-# Nezia Unity (jp.nezia.unity)
+# Nezia Sound Engine (jp.nezia.unity)
 
-Nezia Unity 共通基盤パッケージ。
+Nezia Sound Engine。
 
 ## インストール
 
