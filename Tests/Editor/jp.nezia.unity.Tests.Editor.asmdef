@@ -1,0 +1,25 @@
+{
+  "name": "jp.nezia.unity.Tests.Editor",
+  "rootNamespace": "Nezia.Unity.Editor.Tests",
+  "references": [
+    "jp.nezia.unity.Runtime",
+    "jp.nezia.unity.Editor",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
