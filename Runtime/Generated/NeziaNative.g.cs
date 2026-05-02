@@ -76,6 +76,32 @@ namespace Nezia.Native
         internal static extern NeziaBufferId nezia_buffer_load(NeziaEngine* engine, byte* path_ptr, nuint path_len);
 
         /// <summary>
+        ///  メモリ上のエンコード済みバイト列からロードする。失敗時は INVALID。
+        ///
+        ///  統合層からの主要ロード経路。`NeziaAudioClip.encodedBytes` や Addressables /
+        ///  `UnityWebRequest` で取得した byte 配列をそのまま渡す。フォーマットは symphonia が
+        ///  マジックバイトから自動判別する。
+        ///
+        ///  # 安全性
+        ///  `bytes_ptr` は `bytes_len` バイト読める有効な領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_buffer_load_from_memory", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaBufferId nezia_buffer_load_from_memory(NeziaEngine* engine, byte* bytes_ptr, nuint bytes_len);
+
+        /// <summary>
+        ///  既にデコード済みの PCM サンプル列からロードする。失敗時は INVALID。
+        ///
+        ///  Unity 標準 `AudioClip.GetData()` 結果を渡す移行期間用ブリッジ。
+        ///  `samples_ptr` はインターリーブ形式の f32 PCM（ステレオなら `[L0, R0, L1, R1, ...]`）。
+        ///
+        ///  # 安全性
+        ///  `samples_ptr` は `samples_len` 要素分の有効領域を指すこと。
+        ///  `samples_len` は `channels` の倍数であること（呼出側責任）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_buffer_load_from_pcm", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaBufferId nezia_buffer_load_from_pcm(NeziaEngine* engine, float* samples_ptr, nuint samples_len, ushort channels, uint sample_rate);
+
+        /// <summary>
         ///  バッファをアンロードする。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_buffer_unload", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
