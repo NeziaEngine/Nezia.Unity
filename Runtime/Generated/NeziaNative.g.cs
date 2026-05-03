@@ -110,36 +110,65 @@ namespace Nezia.Native
         /// <summary>
         ///  マスターバスにボイスを再生する（fire-and-forget）。
         ///
+        ///  `looping` は 0 = 一度きり再生 / 非 0 = ループ再生。
         ///  戻り値: 1 = 受理、0 = 失敗（無効バッファ / コマンドキュー満杯）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_source_play", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern byte nezia_source_play(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch);
+        internal static extern byte nezia_source_play(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, byte looping);
 
         /// <summary>
         ///  マスターバスにボイスを再生し、自然終了時にコールバックを呼ぶ。
         ///
         ///  `user_data` のライフタイムはコールバック発火まで呼出側が保証する。
+        ///  `looping != 0` の場合は終了通知が発火しないためコールバックは呼ばれない。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_source_play_with_callback", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern byte nezia_source_play_with_callback(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, delegate* unmanaged[Cdecl]<void*, void> callback, void* user_data);
+        internal static extern byte nezia_source_play_with_callback(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, byte looping, delegate* unmanaged[Cdecl]<void*, void> callback, void* user_data);
 
         /// <summary>
         ///  指定バスにボイスを再生する。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_source_play_to_bus", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern byte nezia_source_play_to_bus(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus);
+        internal static extern byte nezia_source_play_to_bus(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus, byte looping);
 
         /// <summary>
         ///  指定バスにボイスを再生し、自然終了時にコールバックを呼ぶ。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_source_play_to_bus_with_callback", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern byte nezia_source_play_to_bus_with_callback(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus, delegate* unmanaged[Cdecl]<void*, void> callback, void* user_data);
+        internal static extern byte nezia_source_play_to_bus_with_callback(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus, byte looping, delegate* unmanaged[Cdecl]<void*, void> callback, void* user_data);
 
         /// <summary>
         ///  3D ソースをスポーンし、EntityId を返す。失敗時は INVALID。
+        ///
+        ///  `callback` が `Some` のとき、自然終了時に `nezia_engine_poll_events()` 経由で
+        ///  1 度だけ呼ばれる（`looping != 0` の場合は呼ばれない）。`user_data` のライフタイムは
+        ///  コールバック発火まで呼出側が保証する。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_source_spawn", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern NeziaEntityId nezia_source_spawn(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus);
+        internal static extern NeziaEntityId nezia_source_spawn(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus, byte looping, delegate* unmanaged[Cdecl]<void*, void> callback, void* user_data);
+
+        /// <summary>
+        ///  既存ソースのループフラグを動的に変更する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_set_loop", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_set_loop(NeziaEngine* engine, NeziaEntityId source, byte looping);
+
+        /// <summary>
+        ///  ソースが現在 SourceWorld に存在するか確認する。
+        ///
+        ///  1 = 存在、0 = 不在 / generation 不一致 / NULL ポインタ。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_is_alive", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte nezia_source_is_alive(NeziaEngine* engine, NeziaEntityId source);
+
+        /// <summary>
+        ///  現在のソース再生位置（フレーム単位）を取得する。
+        ///
+        ///  取得タイミングはサウンドスレッドからスナップショットされた共有状態に依存し、
+        ///  厳密には数ミリ秒の遅延がある。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_get_position", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_get_position(NeziaEngine* engine, NeziaEntityId source, float* out_frames);
 
         /// <summary>
         ///  ソースの距離減衰パラメータを設定する（初期化・変更時のみ）。
@@ -242,6 +271,18 @@ namespace Nezia.Native
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_listener_set", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern NeziaResult nezia_listener_set(NeziaEngine* engine, NeziaVec3 position, NeziaVec3 forward, NeziaVec3 up);
+
+        /// <summary>
+        ///  SP-06: リスナーフォーカスを設定する。
+        ///
+        ///  距離減衰用とパンニング用で独立した補間係数を取り、空間演算では
+        ///  `lerp(listener_position, focus_point, level)` で導出した仮想リスナー位置を使う。
+        ///  `*_focus_level = 0.0` でフォーカス無効。値域外 `[0.0, 1.0]` は内部でクランプされる。
+        ///
+        ///  コマンドキューが満杯の場合は `QueueFull` を返す。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_listener_set_focus", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_listener_set_focus(NeziaEngine* engine, NeziaVec3 focus_point, float distance_focus_level, float direction_focus_level);
 
 
     }
