@@ -413,17 +413,50 @@ namespace Nezia.Unity
             if (_destroyOnFinish && this != null) Destroy(gameObject);
         }
 
-        private unsafe void PushPosition()
+        private void PushPosition()
         {
             if (!HasLiveSource) return;
             var p = transform.position;
-            var update = new NeziaSourcePositionUpdate
+            EnqueuePendingPosition(new NeziaSourcePositionUpdate
             {
                 source = _spawnedSource,
                 position = new NeziaVec3 { x = p.x, y = p.y, z = p.z },
-            };
-            LibNezia.nezia_source_batch_set_positions(
-                NeziaEngine.RequireHandle(), &update, 1);
+            });
+        }
+
+        // ─── 位置更新の一括送信 ──────────────────────────────────
+        //
+        // 各ソースが個別に nezia_source_batch_set_positions を呼ぶと、
+        // 1 フレームに多数のソースがあるとき FFI 越えの回数がそのまま線形に増える。
+        // 同フレーム内の更新は静的バッファへ積み、フレーム末尾の
+        // NeziaEnginePump からまとめて 1 回の FFI 呼び出しで送る。
+
+        private static NeziaSourcePositionUpdate[] s_pendingPositions = new NeziaSourcePositionUpdate[64];
+        private static int s_pendingPositionCount;
+
+        private static void EnqueuePendingPosition(NeziaSourcePositionUpdate update)
+        {
+            if (s_pendingPositionCount == s_pendingPositions.Length)
+                Array.Resize(ref s_pendingPositions, s_pendingPositions.Length * 2);
+            s_pendingPositions[s_pendingPositionCount++] = update;
+        }
+
+        internal static unsafe void FlushPendingPositions()
+        {
+            if (s_pendingPositionCount == 0) return;
+            if (!NeziaEngine.IsInitialized)
+            {
+                s_pendingPositionCount = 0;
+                return;
+            }
+
+            fixed (NeziaSourcePositionUpdate* ptr = s_pendingPositions)
+            {
+                var r = LibNezia.nezia_source_batch_set_positions(
+                    NeziaEngine.RequireHandle(), ptr, (nuint)s_pendingPositionCount);
+                NeziaException.ThrowIfError(r, "batch set source positions");
+            }
+            s_pendingPositionCount = 0;
         }
     }
 }
