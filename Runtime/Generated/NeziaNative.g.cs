@@ -108,6 +108,57 @@ namespace Nezia.Native
         internal static extern NeziaResult nezia_buffer_unload(NeziaEngine* engine, NeziaBufferId buffer);
 
         /// <summary>
+        ///  バッファに対する読み取りハンドルを開く。
+        ///
+        ///  失敗時（バッファ ID 無効など）は NULL を返す。戻り値は
+        ///  `nezia_buffer_reader_close` で必ず解放すること。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_buffer_reader_open", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaBufferReader* nezia_buffer_reader_open(NeziaEngine* engine, NeziaBufferId buffer);
+
+        /// <summary>
+        ///  バッファリーダーを閉じる。NULL は無視。
+        ///
+        ///  # 安全性
+        ///  `reader` は `nezia_buffer_reader_open` の戻り値かつ未解放であること。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_buffer_reader_close", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void nezia_buffer_reader_close(NeziaBufferReader* reader);
+
+        /// <summary>
+        ///  チャンネル数を返す。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_buffer_reader_channels", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ushort nezia_buffer_reader_channels(NeziaBufferReader* reader);
+
+        /// <summary>
+        ///  サンプルレート（Hz）を返す。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_buffer_reader_sample_rate", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern uint nezia_buffer_reader_sample_rate(NeziaBufferReader* reader);
+
+        /// <summary>
+        ///  総フレーム数（チャンネルあたり）を返す。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_buffer_reader_total_frames", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong nezia_buffer_reader_total_frames(NeziaBufferReader* reader);
+
+        /// <summary>
+        ///  `frame_offset` から `dst` をインターリーブ PCM で埋める。
+        ///
+        ///  戻り値: 実際に書き込んだ **フレーム数**（要求より少ないことがある = EOF 到達）。
+        ///  `dst_len` は `channels` の倍数を期待するが、端数があれば切り捨てる。
+        ///  EOF 到達後の dst 末尾は呼出側で 0 埋めすること（Unity のコールバックは無音を期待）。
+        ///
+        ///  この関数は **任意スレッドから呼んでよい**（lock-free）。
+        ///
+        ///  # 安全性
+        ///  `dst_ptr` は `dst_len` 個の `f32` を書ける有効領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_buffer_reader_read", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong nezia_buffer_reader_read(NeziaBufferReader* reader, ulong frame_offset, float* dst_ptr, nuint dst_len);
+
+        /// <summary>
         ///  マスターバスにボイスを再生する（fire-and-forget）。
         ///
         ///  `looping` は 0 = 一度きり再生 / 非 0 = ループ再生。
@@ -284,6 +335,20 @@ namespace Nezia.Native
         [DllImport(__DllName, EntryPoint = "nezia_listener_set_focus", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern NeziaResult nezia_listener_set_focus(NeziaEngine* engine, NeziaVec3 focus_point, float distance_focus_level, float direction_focus_level);
 
+        /// <summary>
+        ///  メモリ上のバイト列からオーディオメタデータのみを取得する（フルデコードしない）。
+        ///
+        ///  `NeziaAudioImporter` が ScriptedImporter で `.wav` 等を読み込む際、
+        ///  sample rate / channels / total frames を取得するために使う。
+        ///  `out_metadata` には成功時にメタデータが書き込まれる。
+        ///
+        ///  # 安全性
+        ///  - `bytes_ptr` は `bytes_len` バイト読める有効な領域を指すこと。
+        ///  - `out_metadata` は `NeziaAudioMetadata` を 1 個書ける有効な領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_audio_peek_metadata", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_audio_peek_metadata(byte* bytes_ptr, nuint bytes_len, NeziaAudioMetadata* out_metadata);
+
 
     }
 
@@ -329,12 +394,39 @@ namespace Nezia.Native
     }
 
     /// <summary>
+    ///  オーディオファイルのメタデータ（`nezia_audio_peek_metadata` の出力）。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaAudioMetadata
+    {
+        public uint sample_rate;
+        public ushort channels;
+        /// <summary>
+        ///  16-bit alignment padding（`channels` の後）。常に 0。
+        /// </summary>
+        public ushort _pad;
+        /// <summary>
+        ///  総フレーム数（チャンネル数で割る前のサンプル数）。
+        ///  コンテナがフレーム数を持たない場合は 0。
+        /// </summary>
+        public ulong total_frames;
+    }
+
+    /// <summary>
     ///  不透明エンジンハンドル。
     ///
     ///  `*mut NeziaEngine` は `Box&lt;SoundEngine&gt;` を `into_raw` したポインタとして扱う。
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct NeziaEngine
+    {
+    }
+
+    /// <summary>
+    ///  `NeziaBufferReader` 不透明ハンドル。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaBufferReader
     {
     }
 
