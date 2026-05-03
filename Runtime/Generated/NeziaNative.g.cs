@@ -359,6 +359,40 @@ namespace Nezia.Native
         internal static extern NeziaResult nezia_listener_set(NeziaEngine* engine, NeziaVec3 position, NeziaVec3 forward, NeziaVec3 up);
 
         /// <summary>
+        ///  SP-10: リスナーの速度ベクトル (m/s) を設定する。Doppler 計算に使用。
+        ///
+        ///  `nezia_listener_set` と同じ triple buffer に乗るため、両者は順序を問わず
+        ///  同フレーム内で呼んで構わない。既定値 `(0,0,0)` では Doppler 効果は発生しない。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_listener_set_velocity", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_listener_set_velocity(NeziaEngine* engine, NeziaVec3 velocity);
+
+        /// <summary>
+        ///  SP-10: 媒質中の音速 (m/s) を設定する。0 以下は無視される。既定値 343.0（Unity 互換）。
+        ///
+        ///  用途例: 水中シーンで 1480.0 等に変更。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_set_sound_speed", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_set_sound_speed(NeziaEngine* engine, float speed);
+
+        /// <summary>
+        ///  SP-10: 複数ソースの速度を一括更新する（毎フレーム想定）。
+        ///
+        ///  # 安全性
+        ///  `updates_ptr` は `updates_len` 要素分の有効領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_batch_set_velocities", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_batch_set_velocities(NeziaEngine* engine, NeziaSourceVelocityUpdate* updates_ptr, nuint updates_len);
+
+        /// <summary>
+        ///  SP-10: ソースの Doppler 効果レベル `[0.0, 1.0]` を設定する。
+        ///
+        ///  0.0 で Doppler 完全無効、1.0 で物理計算を完全適用。値域外は内部でクランプされる。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_set_doppler_level", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_set_doppler_level(NeziaEngine* engine, NeziaEntityId source, float level);
+
+        /// <summary>
         ///  SP-06: リスナーフォーカスを設定する。
         ///
         ///  距離減衰用とパンニング用で独立した補間係数を取り、空間演算では
@@ -426,6 +460,16 @@ namespace Nezia.Native
     {
         public NeziaEntityId source;
         public NeziaVec3 position;
+    }
+
+    /// <summary>
+    ///  SP-10: `nezia_source_batch_set_velocities` の入力要素。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaSourceVelocityUpdate
+    {
+        public NeziaEntityId source;
+        public NeziaVec3 velocity;
     }
 
     /// <summary>
