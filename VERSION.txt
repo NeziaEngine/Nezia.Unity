@@ -1,4 +1,4 @@
 source-repo: NeziaEngine/Nezia
-source-sha: 61caa8095b566551b44e11d12cce73ef26fb6977
+source-sha: d133a7e3dac3b29a394fc8dbc86652195b1c1613
 source-ref: refs/heads/main
-built-at: 2026-05-03T02:17:56Z
+built-at: 2026-05-03T06:42:02Z
