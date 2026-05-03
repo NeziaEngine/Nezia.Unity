@@ -189,14 +189,18 @@ namespace Nezia.Native
         internal static extern byte nezia_source_play_to_bus_with_callback(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus, byte looping, delegate* unmanaged[Cdecl]<void*, void> callback, void* user_data);
 
         /// <summary>
-        ///  3D ソースをスポーンし、EntityId を返す。失敗時は INVALID。
+        ///  再生を開始し、制御用ハンドル（EntityId）を返す。失敗時は INVALID。
+        ///
+        ///  Source は 1 回の発音インスタンスを表す。バッファ末尾到達 (`looping = 0`) または
+        ///  `nezia_source_stop()` で despawn され、その時点で EntityId は無効化される。
+        ///  再生し直す場合は再度この関数を呼んで新しい EntityId を取得する。
         ///
         ///  `callback` が `Some` のとき、自然終了時に `nezia_engine_poll_events()` 経由で
         ///  1 度だけ呼ばれる（`looping != 0` の場合は呼ばれない）。`user_data` のライフタイムは
         ///  コールバック発火まで呼出側が保証する。
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "nezia_source_spawn", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern NeziaEntityId nezia_source_spawn(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus, byte looping, delegate* unmanaged[Cdecl]<void*, void> callback, void* user_data);
+        [DllImport(__DllName, EntryPoint = "nezia_source_play_with_handle", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaEntityId nezia_source_play_with_handle(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus, byte looping, delegate* unmanaged[Cdecl]<void*, void> callback, void* user_data);
 
         /// <summary>
         ///  既存ソースのループフラグを動的に変更する。
