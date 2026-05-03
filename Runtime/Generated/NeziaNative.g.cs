@@ -243,6 +243,18 @@ namespace Nezia.Native
         [DllImport(__DllName, EntryPoint = "nezia_listener_set", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern NeziaResult nezia_listener_set(NeziaEngine* engine, NeziaVec3 position, NeziaVec3 forward, NeziaVec3 up);
 
+        /// <summary>
+        ///  SP-06: リスナーフォーカスを設定する。
+        ///
+        ///  距離減衰用とパンニング用で独立した補間係数を取り、空間演算では
+        ///  `lerp(listener_position, focus_point, level)` で導出した仮想リスナー位置を使う。
+        ///  `*_focus_level = 0.0` でフォーカス無効。値域外 `[0.0, 1.0]` は内部でクランプされる。
+        ///
+        ///  コマンドキューが満杯の場合は `QueueFull` を返す。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_listener_set_focus", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_listener_set_focus(NeziaEngine* engine, NeziaVec3 focus_point, float distance_focus_level, float direction_focus_level);
+
 
     }
 
