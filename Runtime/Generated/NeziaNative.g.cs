@@ -217,6 +217,22 @@ namespace Nezia.Native
         internal static extern byte nezia_source_is_alive(NeziaEngine* engine, NeziaEntityId source);
 
         /// <summary>
+        ///  複数ソースの生存を一括判定する。
+        ///
+        ///  `out_alive_ptr[i]` には `ids_ptr[i]` が現在の最新スナップショットに存在し
+        ///  generation も一致する場合 `1`、それ以外は `0` が書き込まれる。
+        ///  内部は単発 `nezia_source_is_alive` 呼び出しの繰り返しを 1 回の P/Invoke に
+        ///  集約しつつ、メインスレッド側のスキャンも 1 ループで処理する（FFI 越境の
+        ///  オーバーヘッドが N 倍 → 1 倍）。
+        ///
+        ///  # 安全性
+        ///  - `ids_ptr` は `len` 要素分の有効領域を指すこと。
+        ///  - `out_alive_ptr` は `len` 要素分の書き込み可能領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_batch_is_alive", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_batch_is_alive(NeziaEngine* engine, NeziaEntityId* ids_ptr, nuint len, byte* out_alive_ptr);
+
+        /// <summary>
         ///  現在のソース再生位置（フレーム単位）を取得する。
         ///
         ///  取得タイミングはサウンドスレッドからスナップショットされた共有状態に依存し、
@@ -224,6 +240,21 @@ namespace Nezia.Native
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_source_get_position", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern NeziaResult nezia_source_get_position(NeziaEngine* engine, NeziaEntityId source, float* out_frames);
+
+        /// <summary>
+        ///  複数ソースの再生位置を一括取得する。
+        ///
+        ///  alive でないソースは `out_positions_ptr[i] = NaN` / `out_alive_ptr[i] = 0`。
+        ///  `out_alive_ptr` を不要なら NULL を渡してもよい（その場合 alive 判定は
+        ///  `out_positions_ptr[i]` が NaN かで代替できる）。
+        ///
+        ///  # 安全性
+        ///  - `ids_ptr` は `len` 要素分の有効領域を指すこと。
+        ///  - `out_positions_ptr` は `len` 要素分の書き込み可能領域を指すこと。
+        ///  - `out_alive_ptr` は NULL か、`len` 要素分の書き込み可能領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_batch_get_positions", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_batch_get_positions(NeziaEngine* engine, NeziaEntityId* ids_ptr, nuint len, float* out_positions_ptr, byte* out_alive_ptr);
 
         /// <summary>
         ///  ソースの距離減衰パラメータを設定する（初期化・変更時のみ）。
