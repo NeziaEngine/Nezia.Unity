@@ -154,6 +154,56 @@ namespace Nezia.Native
         internal static extern NeziaResult nezia_source_set_spatial_enabled(NeziaEngine* engine, NeziaEntityId source, byte enabled);
 
         /// <summary>
+        ///  既存ソースの音量を設定する（spawn 後の動的変更）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_set_volume", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_set_volume(NeziaEngine* engine, NeziaEntityId source, float volume);
+
+        /// <summary>
+        ///  既存ソースのピッチを設定する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_set_pitch", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_set_pitch(NeziaEngine* engine, NeziaEntityId source, float pitch);
+
+        /// <summary>
+        ///  ソースの再生位置（フレーム単位）をシークする。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_seek", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_seek(NeziaEngine* engine, NeziaEntityId source, float frame_offset);
+
+        /// <summary>
+        ///  ソースを一時停止する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_pause", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_pause(NeziaEngine* engine, NeziaEntityId source);
+
+        /// <summary>
+        ///  一時停止中のソースを再開する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_resume", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_resume(NeziaEngine* engine, NeziaEntityId source);
+
+        /// <summary>
+        ///  ソースを停止する（次の audio callback で despawn）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_stop", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_stop(NeziaEngine* engine, NeziaEntityId source);
+
+        /// <summary>
+        ///  指定秒数だけ遅らせてマスターバスに再生する（fire-and-forget）。
+        ///
+        ///  戻り値: 1 = 受理、0 = 失敗。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_play_delayed", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte nezia_source_play_delayed(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, float delay_seconds);
+
+        /// <summary>
+        ///  指定秒数だけ遅らせて指定バスに再生する（fire-and-forget）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_play_delayed_to_bus", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte nezia_source_play_delayed_to_bus(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus, float delay_seconds);
+
+        /// <summary>
         ///  複数ソースの位置を一括更新する（毎フレーム想定）。
         ///
         ///  # 安全性
