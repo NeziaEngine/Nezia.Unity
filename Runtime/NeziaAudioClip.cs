@@ -16,7 +16,7 @@ namespace Nezia.Unity
     /// このアセットを生成する。ランタイム生成には <see cref="CreateFromBytes"/> を使う。
     /// </para>
     /// </summary>
-    public sealed class NeziaAudioClip : ScriptableObject
+    public sealed class NeziaAudioClip : NeziaSoundAsset
     {
         [SerializeField] internal byte[] encodedBytes;
         [SerializeField] internal int sampleRate;
@@ -32,10 +32,10 @@ namespace Nezia.Unity
         private bool _bufferLoaded;
 
         /// <summary>このクリップの長さ（秒）。メタデータが揃っていない場合は 0。</summary>
-        public float Length => sampleRate > 0 ? (float)totalSamples / sampleRate : 0f;
+        public override float Length => sampleRate > 0 ? (float)totalSamples / sampleRate : 0f;
 
         /// <summary>サンプリング周波数 (Hz)。</summary>
-        public int SampleRate => sampleRate;
+        public override int SampleRate => sampleRate;
 
         /// <summary>チャンネル数。</summary>
         public int Channels => channels;
@@ -84,11 +84,31 @@ namespace Nezia.Unity
             _bufferLoaded = false;
         }
 
+        // ─── NeziaSoundAsset 実装 ────────────────────────────────
+
+        internal override unsafe NeziaEntityId Spawn(
+            Nezia.Native.NeziaEngine* engine,
+            float volume, float pitch,
+            NeziaEntityId bus, bool looping,
+            delegate* unmanaged[Cdecl]<void*, void> callback, void* userData)
+        {
+            var buffer = GetOrLoadBuffer();
+            if (!buffer.IsValid)
+                return new NeziaEntityId { index = uint.MaxValue, generation = 0 };
+
+            return LibNezia.nezia_source_play_with_handle(
+                engine, buffer.Id, volume, pitch, bus,
+                looping ? (byte)1 : (byte)0, callback, userData);
+        }
+
         // ─── AudioClip 必須箇所への橋渡し ────────────────────────
 
         private AudioClip _proxyClip;
-        private float[] _decodedPcm; // 簡易実装: 一度デコードして保持
-        private int _proxyReadCursor;
+        private NeziaBufferReader _proxyReader;
+        // pcmReadCallback / pcmSetPositionCallback はオーディオスレッドから呼ばれるので、
+        // メインスレッドのフィールドアクセスは Volatile な long で frame offset を共有する。
+        private long _proxyReadCursorFrames;
+        private int _proxyChannels;
 
         /// <summary>
         /// Unity <c>AudioClip</c> が要求される箇所（Timeline AudioTrack・Animation Event・
@@ -96,25 +116,29 @@ namespace Nezia.Unity
         ///
         /// <para>
         /// 内部的には <c>AudioClip.Create(stream: true, ...)</c> で PCM 実体を持たない
-        /// <c>AudioClip</c> façade を遅延生成し、<c>pcmReadCallback</c> で都度供給する。
+        /// <c>AudioClip</c> façade を遅延生成し、<c>pcmReadCallback</c> でネイティブの
+        /// <see cref="NeziaBufferReader"/> から都度供給する。
         /// 補助手段であり、推奨は <see cref="NeziaAudioSource"/> 経由の直接利用。
-        /// </para>
-        ///
-        /// <para>
-        /// 現状の実装はネイティブの「バッファからの PCM 読出し FFI」が未公開のため、
-        /// 暫定的に <see cref="NeziaBuffer.LoadFromAudioClip"/> の逆経路として、
-        /// 一度メモリ上に PCM をデコードして保持する。本番の SPSC リングバッファ供給は
-        /// FFI 拡張時に差し替える。
         /// </para>
         /// </summary>
         public AudioClip AsAudioClip()
         {
             if (_proxyClip != null) return _proxyClip;
 
-            // メタデータ未確定の場合は妥当なデフォルト（44.1kHz / stereo）
-            int sr = sampleRate > 0 ? sampleRate : 44100;
-            int ch = channels > 0 ? channels : 2;
-            int total = totalSamples > 0 ? totalSamples : sr; // 1 秒分のダミー長
+            // バッファをロードしてリーダーを開く。これでネイティブ側のメタデータが確定する。
+            var buffer = GetOrLoadBuffer();
+            if (buffer.IsValid) _proxyReader = buffer.OpenReader();
+
+            // メタデータはリーダー優先、なければ Importer が書いたシリアライズ値、最後に既定値。
+            int sr = (int)(_proxyReader?.SampleRate ?? 0);
+            if (sr == 0) sr = sampleRate > 0 ? sampleRate : 44100;
+            int ch = _proxyReader?.Channels ?? 0;
+            if (ch == 0) ch = channels > 0 ? channels : 2;
+            int total = (int)(_proxyReader?.TotalFrames ?? 0);
+            if (total == 0) total = totalSamples > 0 ? totalSamples : sr;
+
+            _proxyChannels = ch;
+            _proxyReadCursorFrames = 0;
 
             _proxyClip = AudioClip.Create(
                 name: name,
@@ -127,16 +151,32 @@ namespace Nezia.Unity
             return _proxyClip;
         }
 
+        // pcmReadCallback はオーディオスレッドから呼ばれる。NeziaBufferReader.Read は
+        // lock-free なのでそのまま叩いてよい。EOF 到達時は dst 末尾を 0 埋め。
         private void ProxyPcmRead(float[] data)
         {
-            // TODO: ネイティブ側に nezia_buffer_read_pcm が追加され次第差し替える。
-            //       現状は無音を返す（API 形状の維持のみ目的）。
-            for (int i = 0; i < data.Length; i++) data[i] = 0f;
+            var reader = _proxyReader;
+            int ch = _proxyChannels;
+            if (reader == null || ch <= 0)
+            {
+                for (int i = 0; i < data.Length; i++) data[i] = 0f;
+                return;
+            }
+
+            ulong frameOffset = (ulong)System.Threading.Interlocked.Read(ref _proxyReadCursorFrames);
+            int requested = (data.Length / ch) * ch; // チャンネル境界で切り捨て
+            ulong written = reader.Read(data, frameOffset, requested);
+            int writtenSamples = (int)written * ch;
+            for (int i = writtenSamples; i < data.Length; i++) data[i] = 0f;
+
+            System.Threading.Interlocked.Exchange(
+                ref _proxyReadCursorFrames, (long)(frameOffset + written));
         }
 
         private void ProxyPcmSetPosition(int newPosition)
         {
-            _proxyReadCursor = newPosition;
+            // newPosition は frame 単位で渡される (Unity 仕様)。
+            System.Threading.Interlocked.Exchange(ref _proxyReadCursorFrames, newPosition);
         }
 
         // OnDisable は SO の破棄 / Domain Reload 直前 / Editor 終了時に呼ばれる。
@@ -144,6 +184,9 @@ namespace Nezia.Unity
         // 次の OnEnable で _bufferLoaded がクリアされ、次回 GetOrLoadBuffer で再ロードされる。
         private void OnDisable()
         {
+            if (_proxyReader != null) { _proxyReader.Dispose(); _proxyReader = null; }
+            _proxyClip = null;
+
             if (_bufferLoaded && NeziaEngine.IsInitialized)
             {
                 try { _buffer.Unload(); } catch { /* shutdown 順序によっては無視 */ }

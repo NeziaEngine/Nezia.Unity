@@ -25,6 +25,10 @@ namespace Nezia.Unity
     {
         // ─── Inspector 公開 ──────────────────────────────────────
 
+        // 鳴らす対象。NeziaAudioClip / NeziaRandomContainer など NeziaSoundAsset 派生を受ける。
+        // 旧フィールド `_clip` (NeziaAudioClip 型) は AudioSource 互換性維持のため残し、
+        // 値が入っている場合は `_sound` 側にコピーされて優先される (`Reset` / Play 時)。
+        [SerializeField] private NeziaSoundAsset _sound;
         [SerializeField] private NeziaAudioClip _clip;
         [SerializeField, Range(0f, 1f)] private float _volume = 1f;
         [SerializeField, Range(-3f, 3f)] private float _pitch = 1f;
@@ -35,6 +39,9 @@ namespace Nezia.Unity
         [SerializeField] private float _minDistance = 1f;
         [SerializeField] private float _maxDistance = 500f;
         [SerializeField] private NeziaRolloffMode _rolloffMode = NeziaRolloffMode.InverseDistance;
+        [SerializeField] private NeziaAttenuationCurveAsset _attenuationCurve;
+        [SerializeField, Range(0f, 5f)] private float _dopplerLevel = 1f;
+        [SerializeField, Range(0, 255)] private int _priority = 128;
         [SerializeField] private AudioMixerGroup _outputAudioMixerGroup;
         [SerializeField] private NeziaBusMap _busMap;
 
@@ -53,16 +60,44 @@ namespace Nezia.Unity
         // 自然終了（コールバック発火）または明示 Stop で必ず Free する。
         private GCHandle _selfHandle;
 
+        // Inspector で AnimationCurve として編集された減衰カーブを再生中だけネイティブ確保しておく。
+        // Play で生成 → Stop / 自然終了 / Disable で Destroy する。
+        private NeziaAttenuationCurve _liveAttenuationCurve = NeziaAttenuationCurve.Invalid;
+
         private bool HasLiveSource => _spawnedSource.index != uint.MaxValue;
+
+        /// <summary>カスタム距離減衰カーブのアセット。未設定なら <see cref="rolloffMode"/> が使われる。</summary>
+        public NeziaAttenuationCurveAsset attenuationCurve
+        {
+            get => _attenuationCurve;
+            set => _attenuationCurve = value;
+        }
 
         // ─── AudioSource 互換 API ────────────────────────────────
 
-        /// <summary>再生対象クリップ。<c>AudioSource.clip</c> 互換。</summary>
+        /// <summary>
+        /// 再生対象。<see cref="NeziaAudioClip"/>（単発）でも
+        /// <see cref="NeziaRandomContainer"/>（ランダム選択）でも受け取れる。
+        /// </summary>
+        public NeziaSoundAsset sound
+        {
+            get => _sound != null ? _sound : _clip;
+            set
+            {
+                _sound = value;
+                _clip = value as NeziaAudioClip; // 互換 getter のために sync
+            }
+        }
+
+        /// <summary>再生対象クリップ。<c>AudioSource.clip</c> 互換（旧シグネチャ）。</summary>
         public NeziaAudioClip clip
         {
-            get => _clip;
-            set => _clip = value;
+            get => _sound as NeziaAudioClip ?? _clip;
+            set { _clip = value; if (value != null) _sound = value; }
         }
+
+        // 内部用: 現在 dispatch 対象のアセットを返す。`_sound` が優先で、未設定なら旧 `_clip`。
+        private NeziaSoundAsset ResolvedSound => _sound != null ? _sound : _clip;
 
         /// <summary>音量 (0.0〜1.0)。<c>AudioSource.volume</c> 互換。</summary>
         public unsafe float volume
@@ -140,6 +175,55 @@ namespace Nezia.Unity
         /// <summary>距離減衰モデル。</summary>
         public NeziaRolloffMode rolloffMode { get => _rolloffMode; set => _rolloffMode = value; }
 
+        /// <summary>
+        /// Doppler 効果の強度。<c>AudioSource.dopplerLevel</c> 互換。
+        /// Unity 同様 0〜5 の範囲。ネイティブ側は [0, 1] にクランプされる
+        /// （1.0 で物理計算を完全適用、0.0 で無効）。
+        /// </summary>
+        public unsafe float dopplerLevel
+        {
+            get => _dopplerLevel;
+            set
+            {
+                _dopplerLevel = Mathf.Clamp(value, 0f, 5f);
+                if (HasLiveSource)
+                {
+                    var r = LibNezia.nezia_source_set_doppler_level(
+                        NeziaEngine.RequireHandle(), _spawnedSource, _dopplerLevel);
+                    NeziaException.ThrowIfError(r, "set source doppler level");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 再生優先度。<c>AudioSource.priority</c> 互換で 0=最高、255=最低 を維持する。
+        /// Unity 標準は名目上 0..256 だが、Nezia ネイティブは <c>u8</c> なので
+        /// 0..255 を 1 段階ずつ使い切る範囲に統一している。
+        /// 範囲外の値は <see cref="Mathf.Clamp(int, int, int)"/> で 0..255 に切り詰められる。
+        ///
+        /// <para>
+        /// ネイティブ層は Wwise / CRI ADX2 互換 (高い値=高優先) に切り替わったため、
+        /// 統合層で <c>255 - unity_priority</c> で写像してから FFI に渡す。
+        /// </para>
+        /// </summary>
+        public unsafe int priority
+        {
+            get => _priority;
+            set
+            {
+                _priority = Mathf.Clamp(value, 0, 255);
+                if (HasLiveSource)
+                {
+                    var r = LibNezia.nezia_source_set_priority(
+                        NeziaEngine.RequireHandle(), _spawnedSource, ToNativePriority(_priority));
+                    NeziaException.ThrowIfError(r, "set source priority");
+                }
+            }
+        }
+
+        // Unity (低い値=高優先) → ネイティブ Wwise/ADX2 (高い値=高優先) への写像。
+        private static byte ToNativePriority(int unityPriority) => (byte)(255 - unityPriority);
+
         /// <summary>起動時に自動再生するか。<c>AudioSource.playOnAwake</c> 互換。</summary>
         public bool playOnAwake { get => _playOnAwake; set => _playOnAwake = value; }
 
@@ -198,25 +282,26 @@ namespace Nezia.Unity
                 var r = LibNezia.nezia_source_get_position(
                     NeziaEngine.RequireHandle(), _spawnedSource, &frames);
                 if (r != NeziaResult.Ok) return 0f;
-                int sr = (_clip != null && _clip.SampleRate > 0) ? _clip.SampleRate : 44100;
+                var asset = ResolvedSound;
+                int sr = (asset != null && asset.SampleRate > 0) ? asset.SampleRate : 44100;
                 return frames / sr;
             }
             set
             {
                 if (!HasLiveSource) return;
-                int sr = (_clip != null && _clip.SampleRate > 0) ? _clip.SampleRate : 44100;
+                var asset = ResolvedSound;
+                int sr = (asset != null && asset.SampleRate > 0) ? asset.SampleRate : 44100;
                 var r = LibNezia.nezia_source_seek(
                     NeziaEngine.RequireHandle(), _spawnedSource, value * sr);
                 NeziaException.ThrowIfError(r, "seek source");
             }
         }
 
-        /// <summary>クリップを再生する。<c>AudioSource.Play()</c> 互換。</summary>
+        /// <summary>クリップ／コンテナを再生する。<c>AudioSource.Play()</c> 互換。</summary>
         public unsafe void Play()
         {
-            if (_clip == null) return;
-            var buffer = _clip.GetOrLoadBuffer();
-            if (!buffer.IsValid) return;
+            var asset = ResolvedSound;
+            if (asset == null) return;
 
             // 既存ソースがあれば停止してから新規 spawn する（AudioSource.Play の再起動セマンティクス）
             if (HasLiveSource) StopInternal();
@@ -227,18 +312,17 @@ namespace Nezia.Unity
 
             // 自然終了をネイティブから受け取るためのコールバック登録。
             // looping のときは終了通知が発火しないので、コールバック登録自体を省略してよい。
+            // Container 経路は FFI が callback 未対応なので登録しない。
             delegate* unmanaged[Cdecl]<void*, void> cb = null;
             void* userData = null;
-            if (!_loop)
+            if (!_loop && asset.SupportsFinishCallback)
             {
                 _selfHandle = GCHandle.Alloc(this, GCHandleType.Weak);
                 userData = (void*)GCHandle.ToIntPtr(_selfHandle);
                 cb = (delegate* unmanaged[Cdecl]<void*, void>)s_finishCallbackPtr;
             }
 
-            var src = LibNezia.nezia_source_play_with_handle(
-                engine, buffer.Id, effectiveVolume, _pitch, busId,
-                _loop ? (byte)1 : (byte)0, cb, userData);
+            var src = asset.Spawn(engine, effectiveVolume, _pitch, busId, _loop, cb, userData);
             if (src.index == uint.MaxValue)
             {
                 FreeSelfHandle();
@@ -248,6 +332,11 @@ namespace Nezia.Unity
             _spawnedSource = src;
             _isPlaying = true;
             _isPaused = false;
+            _hasPrevPosition = false;
+
+            var prResult = LibNezia.nezia_source_set_priority(
+                engine, src, ToNativePriority(_priority));
+            NeziaException.ThrowIfError(prResult, "set source priority");
 
             if (_spatialBlend > 0f)
             {
@@ -257,6 +346,20 @@ namespace Nezia.Unity
 
                 r = LibNezia.nezia_source_set_spatial_enabled(engine, src, 1);
                 NeziaException.ThrowIfError(r, "set spatial enabled");
+
+                r = LibNezia.nezia_source_set_doppler_level(engine, src, _dopplerLevel);
+                NeziaException.ThrowIfError(r, "set source doppler level");
+
+                if (_attenuationCurve != null)
+                {
+                    _liveAttenuationCurve = _attenuationCurve.ToNative();
+                    if (_liveAttenuationCurve.IsValid)
+                    {
+                        var cr = LibNezia.nezia_source_set_attenuation_curve(
+                            engine, src, _liveAttenuationCurve.Id);
+                        NeziaException.ThrowIfError(cr, "set source attenuation curve");
+                    }
+                }
 
                 PushPosition();
             }
@@ -308,6 +411,36 @@ namespace Nezia.Unity
             _isPaused = false;
         }
 
+        /// <summary>
+        /// 現在再生中のソースにエフェクトを追加する。再生中でない場合は <see cref="InvalidOperationException"/>。
+        /// ソース despawn 時にエフェクトもまとめて解放されるため、明示 <see cref="NeziaEffect.Remove"/>
+        /// は通常不要。
+        /// </summary>
+        public unsafe NeziaEffect AddEffect(NeziaEffectKind kind, NeziaEffectPosition position = NeziaEffectPosition.Post)
+        {
+            if (!HasLiveSource)
+                throw new InvalidOperationException("[Nezia] AddEffect requires the source to be playing.");
+            var id = LibNezia.nezia_effect_add(
+                NeziaEngine.RequireHandle(),
+                Native.NeziaEffectTargetKind.Source, _spawnedSource,
+                (Native.NeziaEffectKind)(byte)kind,
+                (Native.NeziaEffectPosition)(byte)position);
+            return new NeziaEffect(id, kind);
+        }
+
+        /// <summary>
+        /// 現在再生中のソースにカスタム距離減衰カーブを割り当てる。
+        /// <c>NeziaAttenuationCurve.Invalid</c> を渡すとカーブを外す（silent fallback）。
+        /// </summary>
+        public unsafe void SetAttenuationCurve(NeziaAttenuationCurve curve)
+        {
+            if (!HasLiveSource)
+                throw new InvalidOperationException("[Nezia] SetAttenuationCurve requires the source to be playing.");
+            var r = LibNezia.nezia_source_set_attenuation_curve(
+                NeziaEngine.RequireHandle(), _spawnedSource, curve.Id);
+            NeziaException.ThrowIfError(r, "source set attenuation curve");
+        }
+
         /// <summary>位置指定でクリップを 1 回再生する。<c>AudioSource.PlayClipAtPoint</c> 互換。</summary>
         public static void PlayClipAtPoint(NeziaAudioClip clip, Vector3 position, float volume = 1f)
         {
@@ -333,12 +466,12 @@ namespace Nezia.Unity
             if (_busMap != null && _outputAudioMixerGroup != null && !outputBus.IsValid)
                 outputBus = _busMap.Resolve(_outputAudioMixerGroup);
 
-            if (_playOnAwake && _clip != null) Play();
+            if (_playOnAwake && ResolvedSound != null) Play();
         }
 
         private void LateUpdate()
         {
-            if (_isPlaying && !_isPaused && _spatialBlend > 0f) PushPosition();
+            if (_isPlaying && !_isPaused && _spatialBlend > 0f) PushPositionAndVelocity();
         }
 
         private void OnEnable()
@@ -348,6 +481,7 @@ namespace Nezia.Unity
             _spawnedSource = InvalidEntityId;
             _isPlaying = false;
             _isPaused = false;
+            _hasPrevPosition = false;
         }
 
         private void OnDisable() => Stop();
@@ -370,6 +504,14 @@ namespace Nezia.Unity
             _isPaused = false;
             // 明示 Stop の場合は SourceFinished が発火しないので、ここで Free する。
             FreeSelfHandle();
+            DestroyLiveAttenuationCurve();
+        }
+
+        private void DestroyLiveAttenuationCurve()
+        {
+            if (!_liveAttenuationCurve.IsValid) return;
+            if (NeziaEngine.IsInitialized) _liveAttenuationCurve.Destroy();
+            _liveAttenuationCurve = NeziaAttenuationCurve.Invalid;
         }
 
         private void FreeSelfHandle()
@@ -409,9 +551,15 @@ namespace Nezia.Unity
             _isPlaying = false;
             _isPaused = false;
             _selfHandle = default; // 呼び出し元 (OnNativeFinishedStatic) が Free する。
+            DestroyLiveAttenuationCurve();
 
             if (_destroyOnFinish && this != null) Destroy(gameObject);
         }
+
+        // 速度（Doppler 用）は前フレーム位置との差分を Time.deltaTime で割って自動算出する。
+        // ユーザーが明示的に Rigidbody.velocity 等を渡すフックは現状用意していない。
+        private Vector3 _prevPosition;
+        private bool _hasPrevPosition;
 
         private void PushPosition()
         {
@@ -424,6 +572,27 @@ namespace Nezia.Unity
             });
         }
 
+        private void PushPositionAndVelocity()
+        {
+            if (!HasLiveSource) return;
+            var p = transform.position;
+            EnqueuePendingPosition(new NeziaSourcePositionUpdate
+            {
+                source = _spawnedSource,
+                position = new NeziaVec3 { x = p.x, y = p.y, z = p.z },
+            });
+
+            var dt = Time.deltaTime;
+            var v = (_hasPrevPosition && dt > 0f) ? (p - _prevPosition) / dt : Vector3.zero;
+            _prevPosition = p;
+            _hasPrevPosition = true;
+            EnqueuePendingVelocity(new NeziaSourceVelocityUpdate
+            {
+                source = _spawnedSource,
+                velocity = new NeziaVec3 { x = v.x, y = v.y, z = v.z },
+            });
+        }
+
         // ─── 位置更新の一括送信 ──────────────────────────────────
         //
         // 各ソースが個別に nezia_source_batch_set_positions を呼ぶと、
@@ -433,6 +602,8 @@ namespace Nezia.Unity
 
         private static NeziaSourcePositionUpdate[] s_pendingPositions = new NeziaSourcePositionUpdate[64];
         private static int s_pendingPositionCount;
+        private static NeziaSourceVelocityUpdate[] s_pendingVelocities = new NeziaSourceVelocityUpdate[64];
+        private static int s_pendingVelocityCount;
 
         private static void EnqueuePendingPosition(NeziaSourcePositionUpdate update)
         {
@@ -441,22 +612,43 @@ namespace Nezia.Unity
             s_pendingPositions[s_pendingPositionCount++] = update;
         }
 
+        private static void EnqueuePendingVelocity(NeziaSourceVelocityUpdate update)
+        {
+            if (s_pendingVelocityCount == s_pendingVelocities.Length)
+                Array.Resize(ref s_pendingVelocities, s_pendingVelocities.Length * 2);
+            s_pendingVelocities[s_pendingVelocityCount++] = update;
+        }
+
         internal static unsafe void FlushPendingPositions()
         {
-            if (s_pendingPositionCount == 0) return;
             if (!NeziaEngine.IsInitialized)
             {
                 s_pendingPositionCount = 0;
+                s_pendingVelocityCount = 0;
                 return;
             }
 
-            fixed (NeziaSourcePositionUpdate* ptr = s_pendingPositions)
+            if (s_pendingPositionCount > 0)
             {
-                var r = LibNezia.nezia_source_batch_set_positions(
-                    NeziaEngine.RequireHandle(), ptr, (nuint)s_pendingPositionCount);
-                NeziaException.ThrowIfError(r, "batch set source positions");
+                fixed (NeziaSourcePositionUpdate* ptr = s_pendingPositions)
+                {
+                    var r = LibNezia.nezia_source_batch_set_positions(
+                        NeziaEngine.RequireHandle(), ptr, (nuint)s_pendingPositionCount);
+                    NeziaException.ThrowIfError(r, "batch set source positions");
+                }
+                s_pendingPositionCount = 0;
             }
-            s_pendingPositionCount = 0;
+
+            if (s_pendingVelocityCount > 0)
+            {
+                fixed (NeziaSourceVelocityUpdate* ptr = s_pendingVelocities)
+                {
+                    var r = LibNezia.nezia_source_batch_set_velocities(
+                        NeziaEngine.RequireHandle(), ptr, (nuint)s_pendingVelocityCount);
+                    NeziaException.ThrowIfError(r, "batch set source velocities");
+                }
+                s_pendingVelocityCount = 0;
+            }
         }
     }
 }

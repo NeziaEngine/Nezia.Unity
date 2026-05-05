@@ -88,6 +88,79 @@ namespace Nezia.Unity
         public static unsafe NeziaBus MasterBus
             => new NeziaBus(LibNezia.nezia_engine_master_bus(RequireHandle()));
 
+        /// <summary>
+        /// 媒質中の音速 (m/s)。Unity の <c>AudioSettings.speedOfSound</c> 互換。
+        /// 既定 343.0。0 以下は無視。水中シーン等で 1480.0 等に変更する。
+        /// </summary>
+        public static unsafe float SoundSpeed
+        {
+            set
+            {
+                var r = LibNezia.nezia_set_sound_speed(RequireHandle(), value);
+                NeziaException.ThrowIfError(r, "set sound speed");
+            }
+        }
+
+        /// <summary>
+        /// SP-06 リスナーフォーカスを設定する。距離減衰用とパンニング用で
+        /// 独立した補間係数を取り、空間演算では
+        /// <c>lerp(listener_position, focus_point, level)</c> で導出した
+        /// 仮想リスナー位置を使う。<c>level = 0</c> でフォーカス無効。
+        /// </summary>
+        public static unsafe void SetListenerFocus(
+            Vector3 focusPoint, float distanceFocusLevel, float directionFocusLevel)
+        {
+            var r = LibNezia.nezia_listener_set_focus(
+                RequireHandle(),
+                new NeziaVec3 { x = focusPoint.x, y = focusPoint.y, z = focusPoint.z },
+                distanceFocusLevel,
+                directionFocusLevel);
+            NeziaException.ThrowIfError(r, "set listener focus");
+        }
+
+        /// <summary>出力サンプルレート (Hz)。</summary>
+        public static unsafe uint OutputSampleRate
+        {
+            get
+            {
+                uint sr = 0;
+                LibNezia.nezia_engine_output_format(RequireHandle(), &sr, null);
+                return sr;
+            }
+        }
+
+        /// <summary>出力チャンネル数。</summary>
+        public static unsafe ushort OutputChannels
+        {
+            get
+            {
+                ushort ch = 0;
+                LibNezia.nezia_engine_output_format(RequireHandle(), null, &ch);
+                return ch;
+            }
+        }
+
+        /// <summary>エンジン起動以降の累積処理フレーム数 (per-channel sample count)。</summary>
+        public static unsafe ulong DspTimeSamples
+            => LibNezia.nezia_engine_dsp_time_samples(RequireHandle());
+
+        /// <summary><see cref="DspTimeSamples"/> を秒に換算した値。Unity の <c>AudioSettings.dspTime</c> 相当。</summary>
+        public static unsafe double DspTime
+            => LibNezia.nezia_engine_dsp_time_seconds(RequireHandle());
+
+        /// <summary>
+        /// マスター出力キャプチャを有効化し、リーダーを返す。二重呼び出しは <c>null</c> を返す。
+        /// </summary>
+        public static unsafe NeziaMasterCapture EnableMasterCapture()
+        {
+            var reader = LibNezia.nezia_engine_enable_master_capture(RequireHandle());
+            return reader == null ? null : new NeziaMasterCapture(reader);
+        }
+
+        /// <summary>マスター出力キャプチャを無効化する（リーダーは残量 drain 用に残す）。</summary>
+        public static unsafe void DisableMasterCapture()
+            => LibNezia.nezia_engine_disable_master_capture(RequireHandle());
+
         // ─── internal ────────────────────────────────────────────
 
         internal static unsafe global::Nezia.Native.NeziaEngine* RequireHandle()

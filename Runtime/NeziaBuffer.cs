@@ -88,6 +88,70 @@ namespace Nezia.Unity
         }
 
         /// <summary>
+        /// ファイルパスからエンコード済みオーディオをロードする（フルデコードしてメモリ常駐）。
+        /// `streamingAssetsPath` などローカル絶対パス経由のロードに使う。
+        /// 大きなアセットは <see cref="LoadStreaming"/> を検討。
+        /// </summary>
+        public static unsafe NeziaBuffer LoadFromFile(string path)
+        {
+            if (string.IsNullOrEmpty(path)) throw new ArgumentException("path must be non-empty", nameof(path));
+
+            var bytes = System.Text.Encoding.UTF8.GetBytes(path);
+            fixed (byte* p = bytes)
+            {
+                var id = LibNezia.nezia_buffer_load(
+                    NeziaEngine.RequireHandle(), p, (nuint)bytes.Length);
+                return new NeziaBuffer(id);
+            }
+        }
+
+        /// <summary>
+        /// ファイルパスからストリーミング再生用バッファをロードする。
+        /// 巨大な BGM 等、メモリにフルデコードしたくないアセットで使う。
+        /// </summary>
+        /// <param name="path">UTF-8 ファイルパス（絶対パス推奨）。</param>
+        /// <param name="bufferSeconds">リング容量の目安（秒）。0 以下なら 1.0 を使う。</param>
+        public static unsafe NeziaBuffer LoadStreaming(string path, float bufferSeconds = 1.0f)
+        {
+            if (string.IsNullOrEmpty(path)) throw new ArgumentException("path must be non-empty", nameof(path));
+
+            var bytes = System.Text.Encoding.UTF8.GetBytes(path);
+            var opts = new NeziaStreamingOpts { buffer_seconds = bufferSeconds > 0f ? bufferSeconds : 1.0f };
+            fixed (byte* p = bytes)
+            {
+                var id = LibNezia.nezia_buffer_load_streaming(
+                    NeziaEngine.RequireHandle(), p, (nuint)bytes.Length, opts);
+                return new NeziaBuffer(id);
+            }
+        }
+
+        /// <summary>ストリーミングバッファをシークする。静的バッファでは no-op。</summary>
+        public unsafe void SeekStreaming(ulong frameOffset)
+        {
+            if (!IsValid) return;
+            LibNezia.nezia_buffer_seek_streaming(NeziaEngine.RequireHandle(), Id, frameOffset);
+        }
+
+        /// <summary>ストリーミングバッファのループフラグを設定する。静的バッファでは no-op。</summary>
+        public unsafe void SetStreamingLoop(bool looping)
+        {
+            if (!IsValid) return;
+            LibNezia.nezia_buffer_set_streaming_loop(
+                NeziaEngine.RequireHandle(), Id, looping ? (byte)1 : (byte)0);
+        }
+
+        /// <summary>
+        /// このバッファに対する読み取りリーダーを開く。失敗時は <c>null</c>。
+        /// 戻り値は <see cref="NeziaBufferReader.Dispose"/> で解放すること。
+        /// </summary>
+        public unsafe NeziaBufferReader OpenReader()
+        {
+            if (!IsValid) return null;
+            var ptr = LibNezia.nezia_buffer_reader_open(NeziaEngine.RequireHandle(), Id);
+            return ptr == null ? null : new NeziaBufferReader(ptr);
+        }
+
+        /// <summary>
         /// このバッファをアンロードする。アンロード後は再生に使用してはならない。
         /// </summary>
         public unsafe void Unload()
