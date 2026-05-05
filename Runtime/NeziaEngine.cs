@@ -161,6 +161,54 @@ namespace Nezia.Unity
         public static unsafe void DisableMasterCapture()
             => LibNezia.nezia_engine_disable_master_capture(RequireHandle());
 
+        /// <summary>
+        /// オーディオコールバックの DSP 負荷統計を取得する。
+        /// Unity の <c>AudioSettings.GetCPULoad()</c> / Profiler Audio DSP CPU の対応物。
+        /// </summary>
+        public static unsafe NeziaDspStats GetDspStats()
+        {
+            NeziaDspStats stats;
+            var r = LibNezia.nezia_engine_get_dsp_stats(
+                RequireHandle(),
+                &stats.LoadPercent,
+                &stats.CallbackMicroseconds,
+                &stats.PeakMicroseconds,
+                &stats.AverageMicroseconds,
+                &stats.CallbackCount);
+            NeziaException.ThrowIfError(r, "get dsp stats");
+            return stats;
+        }
+
+        /// <summary>
+        /// 現在再生中 (state == Playing) のソース数。Unity の Playing Sources カウンタ相当。
+        /// audio thread が毎コールバック末尾に atomic store した最新値を返す。
+        /// </summary>
+        public static unsafe uint ActiveSourceCount
+        {
+            get
+            {
+                uint count = 0;
+                var r = LibNezia.nezia_engine_get_active_source_count(RequireHandle(), &count);
+                NeziaException.ThrowIfError(r, "get active source count");
+                return count;
+            }
+        }
+
+        /// <summary>
+        /// ベンチマーク用のドロップアウト系累積カウンタを取得する。
+        /// </summary>
+        public static unsafe NeziaDropouts GetDropouts()
+        {
+            NeziaDropouts d;
+            var r = LibNezia.nezia_engine_get_dropouts(
+                RequireHandle(),
+                &d.VoiceSteal,
+                &d.Underrun,
+                &d.DroppedPlayCalls);
+            NeziaException.ThrowIfError(r, "get dropouts");
+            return d;
+        }
+
         // ─── internal ────────────────────────────────────────────
 
         internal static unsafe global::Nezia.Native.NeziaEngine* RequireHandle()
@@ -176,5 +224,40 @@ namespace Nezia.Unity
             if (!s_initialized) return;
             LibNezia.nezia_engine_poll_events(s_handle);
         }
+    }
+
+    /// <summary>
+    /// オーディオコールバックの DSP 負荷統計スナップショット。
+    /// </summary>
+    public struct NeziaDspStats
+    {
+        /// <summary>直近 callback の負荷率 (0.0〜1.0+, <c>last_ns / budget_ns</c>)。</summary>
+        public float LoadPercent;
+        /// <summary>直近 callback の処理時間 (μs)。</summary>
+        public float CallbackMicroseconds;
+        /// <summary>起動以降の最大 callback 処理時間 (μs)。</summary>
+        public float PeakMicroseconds;
+        /// <summary>起動以降の平均 callback 処理時間 (μs)。</summary>
+        public float AverageMicroseconds;
+        /// <summary>起動以降の累積 callback 回数。</summary>
+        public ulong CallbackCount;
+    }
+
+    /// <summary>
+    /// 起動以降のドロップアウト系累積カウンタ (ベンチマーク用)。
+    /// </summary>
+    public struct NeziaDropouts
+    {
+        /// <summary>
+        /// callback ごとの virtualized voice 数の累積和。
+        /// Nezia は <c>MAX_PHYSICAL_VOICES</c> 超過時に優先度下位を一時的に mix スキップする
+        /// 設計のため、伝統的な voice steal とは意味が異なり、
+        /// 「mix されなかった voice-frame の数」と読む。
+        /// </summary>
+        public ulong VoiceSteal;
+        /// <summary>ストリーミングバッファ underrun の累積発生回数。</summary>
+        public ulong Underrun;
+        /// <summary><c>MAX_SOURCES</c> 上限到達による Play コマンド失敗の累積回数。</summary>
+        public ulong DroppedPlayCalls;
     }
 }
