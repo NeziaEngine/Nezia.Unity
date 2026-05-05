@@ -24,6 +24,25 @@
     `nezia_source_batch_set_velocities` に毎フレームバッチ送信
 - 再生成された `NeziaNative.g.cs`（上記 FFI 追加分・`NeziaSourceVelocityUpdate`
   構造体を含む）
+- nezia-core の追加 FFI（Effects / Sends / Snapshots / Containers / Streaming /
+  Master Capture / DSP Time）に追従:
+  - `NeziaEffect` / `NeziaEffectKind` (LowPass / HighPass / Reverb / Compressor) /
+    `NeziaEffectPosition` — `NeziaBus.AddEffect` および
+    `NeziaAudioSource.AddEffect` で挿入、`SetParam` / `Enabled` / `Remove`
+  - `NeziaSend` / `NeziaSendPosition` — `AddBusToBus` /
+    `AddBusToCompressor`（sidechain 駆動を自動 on）、`Gain` / `Position` / `Remove`
+  - `NeziaBus.BindCompressorSidechain` — Compressor の sidechain 駆動を後から制御
+  - `NeziaSnapshot` + `NeziaSnapshot.Builder` — バスゲイン / ミュート / Send ゲイン /
+    エフェクトパラメータをまとめて fade 付きで適用（AudioMixer Snapshot 相当）
+  - `NeziaRandomContainer` — 子バッファから 1 つを擬似ランダムに選んで再生
+  - `NeziaAttenuationCurve` + `NeziaAudioSource.SetAttenuationCurve` —
+    カスタム距離減衰カーブ（`AnimationCurve` 相当）
+  - `NeziaBuffer.LoadStreaming` / `SeekStreaming` / `SetStreamingLoop` —
+    巨大 BGM をフルデコードせずに再生
+  - `NeziaMasterCapture` (`IDisposable`) と
+    `NeziaEngine.EnableMasterCapture` / `DisableMasterCapture` — マスター出力 tap
+  - `NeziaEngine.OutputSampleRate` / `OutputChannels` /
+    `DspTime` / `DspTimeSamples` — `AudioSettings.dspTime` 相当
 
 ## [0.1.0] - 2026-05-02
 

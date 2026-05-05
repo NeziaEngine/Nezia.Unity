@@ -64,6 +64,30 @@ namespace Nezia.Unity
             NeziaException.ThrowIfError(r, "bus set output");
         }
 
+        /// <summary>このバスのエフェクトチェーン末尾にエフェクトを追加する。</summary>
+        public unsafe NeziaEffect AddEffect(NeziaEffectKind kind, NeziaEffectPosition position = NeziaEffectPosition.Post)
+        {
+            var id = LibNezia.nezia_effect_add(
+                NeziaEngine.RequireHandle(),
+                Native.NeziaEffectTargetKind.Bus, Id,
+                (Native.NeziaEffectKind)(byte)kind,
+                (Native.NeziaEffectPosition)(byte)position);
+            return new NeziaEffect(id, kind);
+        }
+
+        /// <summary>
+        /// 追加した Compressor の sidechain 駆動を on/off する。
+        /// <see cref="NeziaSend.AddBusToCompressor"/> は内部で自動 on にするため、後から off にする際に使う。
+        /// </summary>
+        public static unsafe void BindCompressorSidechain(NeziaEffect compressor, bool enabled)
+        {
+            if (compressor.Kind != NeziaEffectKind.Compressor)
+                throw new ArgumentException("compressor must be NeziaEffectKind.Compressor", nameof(compressor));
+            var r = LibNezia.nezia_compressor_bind_sidechain(
+                NeziaEngine.RequireHandle(), compressor.Id, enabled ? (byte)1 : (byte)0);
+            NeziaException.ThrowIfError(r, "compressor bind sidechain");
+        }
+
         /// <summary>このバスを削除する。マスターバスは削除できない。</summary>
         public unsafe void Destroy()
         {

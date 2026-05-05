@@ -359,6 +359,36 @@ namespace Nezia.Unity
             _isPaused = false;
         }
 
+        /// <summary>
+        /// 現在再生中のソースにエフェクトを追加する。再生中でない場合は <see cref="InvalidOperationException"/>。
+        /// ソース despawn 時にエフェクトもまとめて解放されるため、明示 <see cref="NeziaEffect.Remove"/>
+        /// は通常不要。
+        /// </summary>
+        public unsafe NeziaEffect AddEffect(NeziaEffectKind kind, NeziaEffectPosition position = NeziaEffectPosition.Post)
+        {
+            if (!HasLiveSource)
+                throw new InvalidOperationException("[Nezia] AddEffect requires the source to be playing.");
+            var id = LibNezia.nezia_effect_add(
+                NeziaEngine.RequireHandle(),
+                Native.NeziaEffectTargetKind.Source, _spawnedSource,
+                (Native.NeziaEffectKind)(byte)kind,
+                (Native.NeziaEffectPosition)(byte)position);
+            return new NeziaEffect(id, kind);
+        }
+
+        /// <summary>
+        /// 現在再生中のソースにカスタム距離減衰カーブを割り当てる。
+        /// <c>NeziaAttenuationCurve.Invalid</c> を渡すとカーブを外す（silent fallback）。
+        /// </summary>
+        public unsafe void SetAttenuationCurve(NeziaAttenuationCurve curve)
+        {
+            if (!HasLiveSource)
+                throw new InvalidOperationException("[Nezia] SetAttenuationCurve requires the source to be playing.");
+            var r = LibNezia.nezia_source_set_attenuation_curve(
+                NeziaEngine.RequireHandle(), _spawnedSource, curve.Id);
+            NeziaException.ThrowIfError(r, "source set attenuation curve");
+        }
+
         /// <summary>位置指定でクリップを 1 回再生する。<c>AudioSource.PlayClipAtPoint</c> 互換。</summary>
         public static void PlayClipAtPoint(NeziaAudioClip clip, Vector3 position, float volume = 1f)
         {
