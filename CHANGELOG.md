@@ -37,7 +37,15 @@
   - `NeziaBus.BindCompressorSidechain` — Compressor の sidechain 駆動を後から制御
   - `NeziaSnapshot` + `NeziaSnapshot.Builder` — バスゲイン / ミュート / Send ゲイン /
     エフェクトパラメータをまとめて fade 付きで適用（AudioMixer Snapshot 相当）
-  - `NeziaRandomContainer` — 子バッファから 1 つを擬似ランダムに選んで再生
+  - `NeziaSoundAsset`（抽象 `ScriptableObject` 基底）と
+    `NeziaRandomContainer`（`NeziaSoundAsset` 派生・`[CreateAssetMenu]`）—
+    `docs/design/core/container.md` の Unity 統合設計に従い、`NeziaAudioClip`
+    （単発再生）と `NeziaRandomContainer`（ランダム選択）を統一基底で扱う。
+    `NeziaAudioSource.sound` フィールドが基底型を受け、Inspector D&D で
+    どちらでも同じインターフェースで鳴らせる。子は `NeziaSoundAsset[]`
+    基底型配列で、将来の Container ネスト（`ContainerChild::Container`）に
+    Inspector 構造を変えずに対応できる。`NeziaAudioClip` は
+    `NeziaSoundAsset` を継承するように変更（既存利用は無影響）
   - `NeziaAttenuationCurve` + `NeziaAudioSource.SetAttenuationCurve` —
     カスタム距離減衰カーブ（`AnimationCurve` 相当）
   - `NeziaAttenuationCurveAsset` (`ScriptableObject` / `CreateAssetMenu`) —

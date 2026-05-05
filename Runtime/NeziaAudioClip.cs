@@ -16,7 +16,7 @@ namespace Nezia.Unity
     /// このアセットを生成する。ランタイム生成には <see cref="CreateFromBytes"/> を使う。
     /// </para>
     /// </summary>
-    public sealed class NeziaAudioClip : ScriptableObject
+    public sealed class NeziaAudioClip : NeziaSoundAsset
     {
         [SerializeField] internal byte[] encodedBytes;
         [SerializeField] internal int sampleRate;
@@ -32,10 +32,10 @@ namespace Nezia.Unity
         private bool _bufferLoaded;
 
         /// <summary>このクリップの長さ（秒）。メタデータが揃っていない場合は 0。</summary>
-        public float Length => sampleRate > 0 ? (float)totalSamples / sampleRate : 0f;
+        public override float Length => sampleRate > 0 ? (float)totalSamples / sampleRate : 0f;
 
         /// <summary>サンプリング周波数 (Hz)。</summary>
-        public int SampleRate => sampleRate;
+        public override int SampleRate => sampleRate;
 
         /// <summary>チャンネル数。</summary>
         public int Channels => channels;
@@ -82,6 +82,23 @@ namespace Nezia.Unity
         {
             _buffer = NeziaBuffer.Invalid;
             _bufferLoaded = false;
+        }
+
+        // ─── NeziaSoundAsset 実装 ────────────────────────────────
+
+        internal override unsafe NeziaEntityId Spawn(
+            Nezia.Native.NeziaEngine* engine,
+            float volume, float pitch,
+            NeziaEntityId bus, bool looping,
+            delegate* unmanaged[Cdecl]<void*, void> callback, void* userData)
+        {
+            var buffer = GetOrLoadBuffer();
+            if (!buffer.IsValid)
+                return new NeziaEntityId { index = uint.MaxValue, generation = 0 };
+
+            return LibNezia.nezia_source_play_with_handle(
+                engine, buffer.Id, volume, pitch, bus,
+                looping ? (byte)1 : (byte)0, callback, userData);
         }
 
         // ─── AudioClip 必須箇所への橋渡し ────────────────────────

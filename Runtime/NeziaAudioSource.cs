@@ -25,6 +25,10 @@ namespace Nezia.Unity
     {
         // ─── Inspector 公開 ──────────────────────────────────────
 
+        // 鳴らす対象。NeziaAudioClip / NeziaRandomContainer など NeziaSoundAsset 派生を受ける。
+        // 旧フィールド `_clip` (NeziaAudioClip 型) は AudioSource 互換性維持のため残し、
+        // 値が入っている場合は `_sound` 側にコピーされて優先される (`Reset` / Play 時)。
+        [SerializeField] private NeziaSoundAsset _sound;
         [SerializeField] private NeziaAudioClip _clip;
         [SerializeField, Range(0f, 1f)] private float _volume = 1f;
         [SerializeField, Range(-3f, 3f)] private float _pitch = 1f;
@@ -71,12 +75,29 @@ namespace Nezia.Unity
 
         // ─── AudioSource 互換 API ────────────────────────────────
 
-        /// <summary>再生対象クリップ。<c>AudioSource.clip</c> 互換。</summary>
+        /// <summary>
+        /// 再生対象。<see cref="NeziaAudioClip"/>（単発）でも
+        /// <see cref="NeziaRandomContainer"/>（ランダム選択）でも受け取れる。
+        /// </summary>
+        public NeziaSoundAsset sound
+        {
+            get => _sound != null ? _sound : _clip;
+            set
+            {
+                _sound = value;
+                _clip = value as NeziaAudioClip; // 互換 getter のために sync
+            }
+        }
+
+        /// <summary>再生対象クリップ。<c>AudioSource.clip</c> 互換（旧シグネチャ）。</summary>
         public NeziaAudioClip clip
         {
-            get => _clip;
-            set => _clip = value;
+            get => _sound as NeziaAudioClip ?? _clip;
+            set { _clip = value; if (value != null) _sound = value; }
         }
+
+        // 内部用: 現在 dispatch 対象のアセットを返す。`_sound` が優先で、未設定なら旧 `_clip`。
+        private NeziaSoundAsset ResolvedSound => _sound != null ? _sound : _clip;
 
         /// <summary>音量 (0.0〜1.0)。<c>AudioSource.volume</c> 互換。</summary>
         public unsafe float volume
@@ -261,25 +282,26 @@ namespace Nezia.Unity
                 var r = LibNezia.nezia_source_get_position(
                     NeziaEngine.RequireHandle(), _spawnedSource, &frames);
                 if (r != NeziaResult.Ok) return 0f;
-                int sr = (_clip != null && _clip.SampleRate > 0) ? _clip.SampleRate : 44100;
+                var asset = ResolvedSound;
+                int sr = (asset != null && asset.SampleRate > 0) ? asset.SampleRate : 44100;
                 return frames / sr;
             }
             set
             {
                 if (!HasLiveSource) return;
-                int sr = (_clip != null && _clip.SampleRate > 0) ? _clip.SampleRate : 44100;
+                var asset = ResolvedSound;
+                int sr = (asset != null && asset.SampleRate > 0) ? asset.SampleRate : 44100;
                 var r = LibNezia.nezia_source_seek(
                     NeziaEngine.RequireHandle(), _spawnedSource, value * sr);
                 NeziaException.ThrowIfError(r, "seek source");
             }
         }
 
-        /// <summary>クリップを再生する。<c>AudioSource.Play()</c> 互換。</summary>
+        /// <summary>クリップ／コンテナを再生する。<c>AudioSource.Play()</c> 互換。</summary>
         public unsafe void Play()
         {
-            if (_clip == null) return;
-            var buffer = _clip.GetOrLoadBuffer();
-            if (!buffer.IsValid) return;
+            var asset = ResolvedSound;
+            if (asset == null) return;
 
             // 既存ソースがあれば停止してから新規 spawn する（AudioSource.Play の再起動セマンティクス）
             if (HasLiveSource) StopInternal();
@@ -290,18 +312,17 @@ namespace Nezia.Unity
 
             // 自然終了をネイティブから受け取るためのコールバック登録。
             // looping のときは終了通知が発火しないので、コールバック登録自体を省略してよい。
+            // Container 経路は FFI が callback 未対応なので登録しない。
             delegate* unmanaged[Cdecl]<void*, void> cb = null;
             void* userData = null;
-            if (!_loop)
+            if (!_loop && asset.SupportsFinishCallback)
             {
                 _selfHandle = GCHandle.Alloc(this, GCHandleType.Weak);
                 userData = (void*)GCHandle.ToIntPtr(_selfHandle);
                 cb = (delegate* unmanaged[Cdecl]<void*, void>)s_finishCallbackPtr;
             }
 
-            var src = LibNezia.nezia_source_play_with_handle(
-                engine, buffer.Id, effectiveVolume, _pitch, busId,
-                _loop ? (byte)1 : (byte)0, cb, userData);
+            var src = asset.Spawn(engine, effectiveVolume, _pitch, busId, _loop, cb, userData);
             if (src.index == uint.MaxValue)
             {
                 FreeSelfHandle();
@@ -445,7 +466,7 @@ namespace Nezia.Unity
             if (_busMap != null && _outputAudioMixerGroup != null && !outputBus.IsValid)
                 outputBus = _busMap.Resolve(_outputAudioMixerGroup);
 
-            if (_playOnAwake && _clip != null) Play();
+            if (_playOnAwake && ResolvedSound != null) Play();
         }
 
         private void LateUpdate()
