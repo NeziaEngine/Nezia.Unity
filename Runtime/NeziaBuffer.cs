@@ -88,6 +88,24 @@ namespace Nezia.Unity
         }
 
         /// <summary>
+        /// ファイルパスからエンコード済みオーディオをロードする（フルデコードしてメモリ常駐）。
+        /// `streamingAssetsPath` などローカル絶対パス経由のロードに使う。
+        /// 大きなアセットは <see cref="LoadStreaming"/> を検討。
+        /// </summary>
+        public static unsafe NeziaBuffer LoadFromFile(string path)
+        {
+            if (string.IsNullOrEmpty(path)) throw new ArgumentException("path must be non-empty", nameof(path));
+
+            var bytes = System.Text.Encoding.UTF8.GetBytes(path);
+            fixed (byte* p = bytes)
+            {
+                var id = LibNezia.nezia_buffer_load(
+                    NeziaEngine.RequireHandle(), p, (nuint)bytes.Length);
+                return new NeziaBuffer(id);
+            }
+        }
+
+        /// <summary>
         /// ファイルパスからストリーミング再生用バッファをロードする。
         /// 巨大な BGM 等、メモリにフルデコードしたくないアセットで使う。
         /// </summary>
@@ -120,6 +138,17 @@ namespace Nezia.Unity
             if (!IsValid) return;
             LibNezia.nezia_buffer_set_streaming_loop(
                 NeziaEngine.RequireHandle(), Id, looping ? (byte)1 : (byte)0);
+        }
+
+        /// <summary>
+        /// このバッファに対する読み取りリーダーを開く。失敗時は <c>null</c>。
+        /// 戻り値は <see cref="NeziaBufferReader.Dispose"/> で解放すること。
+        /// </summary>
+        public unsafe NeziaBufferReader OpenReader()
+        {
+            if (!IsValid) return null;
+            var ptr = LibNezia.nezia_buffer_reader_open(NeziaEngine.RequireHandle(), Id);
+            return ptr == null ? null : new NeziaBufferReader(ptr);
         }
 
         /// <summary>

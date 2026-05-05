@@ -55,6 +55,15 @@
     で破棄する
   - `NeziaBuffer.LoadStreaming` / `SeekStreaming` / `SetStreamingLoop` —
     巨大 BGM をフルデコードせずに再生
+  - `NeziaBuffer.LoadFromFile` — ファイルパスからのフルロード
+    （`streamingAssetsPath` 等用）
+  - `NeziaBuffer.OpenReader` + `NeziaBufferReader` (`IDisposable`) —
+    任意スレッド可・lock-free の PCM 読み出しリーダー
+  - `NeziaAudioClip.AsAudioClip` を `NeziaBufferReader` ベースに差し替え。
+    Unity の `pcmReadCallback` 経路で実音が出るようになり、Timeline /
+    AudioTrack / Animation Event 等 `AudioClip` を要求するサードパーティ
+    アセットとの連携が機能する（旧実装は無音返しの暫定版）
+  - `NeziaRandomContainer.PlayFireAndForget` — 制御ハンドル不要な軽量再生
   - `NeziaMasterCapture` (`IDisposable`) と
     `NeziaEngine.EnableMasterCapture` / `DisableMasterCapture` — マスター出力 tap
   - `NeziaEngine.OutputSampleRate` / `OutputChannels` /

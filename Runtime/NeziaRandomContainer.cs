@@ -77,6 +77,24 @@ namespace Nezia.Unity
             Resolve(NeziaEngine.RequireHandle());
         }
 
+        /// <summary>
+        /// 子を 1 つランダムに選んで fire-and-forget で再生する（制御ハンドル不要なケース）。
+        /// <paramref name="bus"/> が <c>default</c> または <see cref="NeziaBus.Invalid"/> の場合は
+        /// マスターバスへ送る。
+        /// </summary>
+        public unsafe void PlayFireAndForget(
+            float volume = 1f, float pitch = 1f, NeziaBus bus = default, bool looping = false)
+        {
+            var engine = NeziaEngine.RequireHandle();
+            if (!_resolved) Resolve(engine);
+            if (!_resolved) return;
+
+            var busId = bus.IsValid ? bus.Id : LibNezia.nezia_engine_master_bus(engine);
+            var r = LibNezia.nezia_container_play(
+                engine, _containerId, volume, pitch, busId, looping ? (byte)1 : (byte)0);
+            NeziaException.ThrowIfError(r, "container play");
+        }
+
         internal unsafe void Resolve(Nezia.Native.NeziaEngine* engine)
         {
             if (_resolved) return;
