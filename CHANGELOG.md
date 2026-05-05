@@ -5,6 +5,26 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [Semantic Versioning](https://semver.org/lang/ja/) に従います。
 
+## [Unreleased]
+
+### Added
+
+- nezia-core の新規 FFI に追従:
+  - `NeziaEngine.SoundSpeed` — `nezia_set_sound_speed`（媒質中の音速、Unity の
+    `AudioSettings.speedOfSound` 互換）
+  - `NeziaEngine.SetListenerFocus` — SP-06 リスナーフォーカス
+    （`nezia_listener_set_focus`）
+  - `NeziaAudioSource.dopplerLevel` — `AudioSource.dopplerLevel` 互換
+    （`nezia_source_set_doppler_level`、SP-10）
+  - `NeziaAudioSource.priority` — `AudioSource.priority` 互換
+    （`nezia_source_set_priority`、Phase 2-2 Voice Virtualization 用）
+  - `NeziaAudioListener` がリスナー速度を自動算出して
+    `nezia_listener_set_velocity` に publish
+  - `NeziaAudioSource` がソース速度を自動算出して
+    `nezia_source_batch_set_velocities` に毎フレームバッチ送信
+- 再生成された `NeziaNative.g.cs`（上記 FFI 追加分・`NeziaSourceVelocityUpdate`
+  構造体を含む）
+
 ## [0.1.0] - 2026-05-02
 
 ### Added
