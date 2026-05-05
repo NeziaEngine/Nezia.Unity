@@ -209,12 +209,36 @@ namespace Nezia.Native
         internal static extern NeziaResult nezia_source_set_loop(NeziaEngine* engine, NeziaEntityId source, byte looping);
 
         /// <summary>
+        ///  Voice Virtualization 用優先度を設定する (Unity `AudioSource.priority` 互換)。
+        ///
+        ///  0..255、低いほど高優先。既定 128。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_set_priority", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_set_priority(NeziaEngine* engine, NeziaEntityId source, byte priority);
+
+        /// <summary>
         ///  ソースが現在 SourceWorld に存在するか確認する。
         ///
         ///  1 = 存在、0 = 不在 / generation 不一致 / NULL ポインタ。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_source_is_alive", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte nezia_source_is_alive(NeziaEngine* engine, NeziaEntityId source);
+
+        /// <summary>
+        ///  複数ソースの生存を一括判定する。
+        ///
+        ///  `out_alive_ptr[i]` には `ids_ptr[i]` が現在の最新スナップショットに存在し
+        ///  generation も一致する場合 `1`、それ以外は `0` が書き込まれる。
+        ///  内部は単発 `nezia_source_is_alive` 呼び出しの繰り返しを 1 回の P/Invoke に
+        ///  集約しつつ、メインスレッド側のスキャンも 1 ループで処理する（FFI 越境の
+        ///  オーバーヘッドが N 倍 → 1 倍）。
+        ///
+        ///  # 安全性
+        ///  - `ids_ptr` は `len` 要素分の有効領域を指すこと。
+        ///  - `out_alive_ptr` は `len` 要素分の書き込み可能領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_batch_is_alive", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_batch_is_alive(NeziaEngine* engine, NeziaEntityId* ids_ptr, nuint len, byte* out_alive_ptr);
 
         /// <summary>
         ///  現在のソース再生位置（フレーム単位）を取得する。
@@ -224,6 +248,21 @@ namespace Nezia.Native
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_source_get_position", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern NeziaResult nezia_source_get_position(NeziaEngine* engine, NeziaEntityId source, float* out_frames);
+
+        /// <summary>
+        ///  複数ソースの再生位置を一括取得する。
+        ///
+        ///  alive でないソースは `out_positions_ptr[i] = NaN` / `out_alive_ptr[i] = 0`。
+        ///  `out_alive_ptr` を不要なら NULL を渡してもよい（その場合 alive 判定は
+        ///  `out_positions_ptr[i]` が NaN かで代替できる）。
+        ///
+        ///  # 安全性
+        ///  - `ids_ptr` は `len` 要素分の有効領域を指すこと。
+        ///  - `out_positions_ptr` は `len` 要素分の書き込み可能領域を指すこと。
+        ///  - `out_alive_ptr` は NULL か、`len` 要素分の書き込み可能領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_batch_get_positions", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_batch_get_positions(NeziaEngine* engine, NeziaEntityId* ids_ptr, nuint len, float* out_positions_ptr, byte* out_alive_ptr);
 
         /// <summary>
         ///  ソースの距離減衰パラメータを設定する（初期化・変更時のみ）。
@@ -328,6 +367,40 @@ namespace Nezia.Native
         internal static extern NeziaResult nezia_listener_set(NeziaEngine* engine, NeziaVec3 position, NeziaVec3 forward, NeziaVec3 up);
 
         /// <summary>
+        ///  SP-10: リスナーの速度ベクトル (m/s) を設定する。Doppler 計算に使用。
+        ///
+        ///  `nezia_listener_set` と同じ triple buffer に乗るため、両者は順序を問わず
+        ///  同フレーム内で呼んで構わない。既定値 `(0,0,0)` では Doppler 効果は発生しない。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_listener_set_velocity", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_listener_set_velocity(NeziaEngine* engine, NeziaVec3 velocity);
+
+        /// <summary>
+        ///  SP-10: 媒質中の音速 (m/s) を設定する。0 以下は無視される。既定値 343.0（Unity 互換）。
+        ///
+        ///  用途例: 水中シーンで 1480.0 等に変更。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_set_sound_speed", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_set_sound_speed(NeziaEngine* engine, float speed);
+
+        /// <summary>
+        ///  SP-10: 複数ソースの速度を一括更新する（毎フレーム想定）。
+        ///
+        ///  # 安全性
+        ///  `updates_ptr` は `updates_len` 要素分の有効領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_batch_set_velocities", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_batch_set_velocities(NeziaEngine* engine, NeziaSourceVelocityUpdate* updates_ptr, nuint updates_len);
+
+        /// <summary>
+        ///  SP-10: ソースの Doppler 効果レベル `[0.0, 1.0]` を設定する。
+        ///
+        ///  0.0 で Doppler 完全無効、1.0 で物理計算を完全適用。値域外は内部でクランプされる。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_set_doppler_level", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_set_doppler_level(NeziaEngine* engine, NeziaEntityId source, float level);
+
+        /// <summary>
         ///  SP-06: リスナーフォーカスを設定する。
         ///
         ///  距離減衰用とパンニング用で独立した補間係数を取り、空間演算では
@@ -395,6 +468,16 @@ namespace Nezia.Native
     {
         public NeziaEntityId source;
         public NeziaVec3 position;
+    }
+
+    /// <summary>
+    ///  SP-10: `nezia_source_batch_set_velocities` の入力要素。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaSourceVelocityUpdate
+    {
+        public NeziaEntityId source;
+        public NeziaVec3 velocity;
     }
 
     /// <summary>
