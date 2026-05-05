@@ -64,6 +64,47 @@ namespace Nezia.Native
         internal static extern NeziaEntityId nezia_engine_master_bus(NeziaEngine* engine);
 
         /// <summary>
+        ///  直近 audio callback の DSP CPU 計測値を取得する (ベンチマーク用)。
+        ///
+        ///  任意スレッドから lock-free に呼び出せる。NULL 引数はスキップ可。
+        ///
+        ///  - `out_load_pct`: 直近 callback の負荷率 (0.0..=1.0+)。`last_ns / budget_ns`。
+        ///  - `out_callback_us`: 直近 callback の処理時間 (マイクロ秒)。
+        ///  - `out_peak_us`: 起動以降の最大 callback 処理時間 (マイクロ秒)。
+        ///  - `out_average_us`: `callback_total_ns / callback_count` の平均処理時間 (マイクロ秒)。
+        ///  - `out_callback_count`: 起動以降の累積 callback 回数。
+        ///
+        ///  Unity の `AudioSettings.GetCPULoad()` / Profiler Audio DSP CPU の対応物。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_engine_get_dsp_stats", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_engine_get_dsp_stats(NeziaEngine* engine, float* out_load_pct, float* out_callback_us, float* out_peak_us, float* out_average_us, ulong* out_callback_count);
+
+        /// <summary>
+        ///  現在再生中 (state == Playing) のソース数を取得する。
+        ///
+        ///  audio thread が毎コールバック末尾に atomic store した最新値を返す
+        ///  (`poll_events()` 不要)。Stopped / Pausing は除外される。Unity の
+        ///  Playing Sources カウンタ相当。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_engine_get_active_source_count", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_engine_get_active_source_count(NeziaEngine* engine, uint* out_count);
+
+        /// <summary>
+        ///  ドロップアウト系カウンタを取得する (ベンチマーク用)。
+        ///
+        ///  すべて起動以降の cumulative カウンタ。NULL 引数はスキップ可。
+        ///
+        ///  - `out_voice_steal`: callback ごとの virtualized voice 数の累積和。
+        ///    現状の Nezia は `MAX_PHYSICAL_VOICES` 超過時に「優先度下位を一時的に
+        ///    mix スキップ」する設計のため、伝統的な voice steal とは意味が異なる。
+        ///    ベンチマーク観点では「mix されなかった voice-frame の数」と読める。
+        ///  - `out_underrun`: ストリーミングバッファ underrun の累積発生回数。
+        ///  - `out_dropped_play_calls`: `MAX_SOURCES` 上限到達による Play コマンド失敗の累積回数。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_engine_get_dropouts", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_engine_get_dropouts(NeziaEngine* engine, ulong* out_voice_steal, ulong* out_underrun, ulong* out_dropped_play_calls);
+
+        /// <summary>
         ///  オーディオファイルをロードしてハンドルを返す。失敗時は `INVALID` を返す。
         ///
         ///  # 引数
