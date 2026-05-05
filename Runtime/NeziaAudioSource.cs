@@ -36,7 +36,7 @@ namespace Nezia.Unity
         [SerializeField] private float _maxDistance = 500f;
         [SerializeField] private NeziaRolloffMode _rolloffMode = NeziaRolloffMode.InverseDistance;
         [SerializeField, Range(0f, 5f)] private float _dopplerLevel = 1f;
-        [SerializeField, Range(0, 256)] private int _priority = 128;
+        [SerializeField, Range(0, 255)] private int _priority = 128;
         [SerializeField] private AudioMixerGroup _outputAudioMixerGroup;
         [SerializeField] private NeziaBusMap _busMap;
 
@@ -163,20 +163,21 @@ namespace Nezia.Unity
         }
 
         /// <summary>
-        /// 再生優先度。<c>AudioSource.priority</c> 互換 (0=最高, 256=最低)。
-        /// Nezia ネイティブは 0..255 を取るため 256 は 255 にクランプされる。
+        /// 再生優先度。<c>AudioSource.priority</c> 互換 (0=最高、255=最低)。
+        /// Unity 標準は名目上 0..256 だが、Nezia ネイティブは <c>u8</c> なので
+        /// 0..255 を 1 段階ずつ使い切る範囲に統一している。
+        /// 範囲外の値は <see cref="Mathf.Clamp(int, int, int)"/> で 0..255 に切り詰められる。
         /// </summary>
         public unsafe int priority
         {
             get => _priority;
             set
             {
-                _priority = Mathf.Clamp(value, 0, 256);
+                _priority = Mathf.Clamp(value, 0, 255);
                 if (HasLiveSource)
                 {
                     var r = LibNezia.nezia_source_set_priority(
-                        NeziaEngine.RequireHandle(), _spawnedSource,
-                        (byte)Mathf.Min(_priority, 255));
+                        NeziaEngine.RequireHandle(), _spawnedSource, (byte)_priority);
                     NeziaException.ThrowIfError(r, "set source priority");
                 }
             }
@@ -292,9 +293,8 @@ namespace Nezia.Unity
             _isPaused = false;
             _hasPrevPosition = false;
 
-            // 0..256 → 0..255 にクランプして適用（Unity の 256 は最低優先度）。
             var prResult = LibNezia.nezia_source_set_priority(
-                engine, src, (byte)Mathf.Min(_priority, 255));
+                engine, src, (byte)_priority);
             NeziaException.ThrowIfError(prResult, "set source priority");
 
             if (_spatialBlend > 0f)
