@@ -49,9 +49,7 @@ namespace Nezia.Unity
             }
         }
 
-        // Container play_with_handle はコールバック未対応 (core 側 FFI に変種なし)。
-        // NeziaAudioSource は alive ポーリング / 明示 Stop に依存する。
-        internal override bool SupportsFinishCallback => false;
+        internal override bool SupportsFinishCallback => true;
 
         internal override unsafe NeziaEntityId Spawn(
             Nezia.Native.NeziaEngine* engineHandle,
@@ -63,9 +61,9 @@ namespace Nezia.Unity
             if (!_resolved)
                 return new NeziaEntityId { index = uint.MaxValue, generation = 0 };
 
-            // callback / userData は無視（Container 経路は finish callback 未対応）。
             return LibNezia.nezia_container_play_with_handle(
-                engineHandle, _containerId, volume, pitch, bus, looping ? (byte)1 : (byte)0);
+                engineHandle, _containerId, volume, pitch, bus, looping ? (byte)1 : (byte)0,
+                callback, userData);
         }
 
         /// <summary>
