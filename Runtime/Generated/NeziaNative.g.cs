@@ -209,9 +209,9 @@ namespace Nezia.Native
         internal static extern NeziaResult nezia_source_set_loop(NeziaEngine* engine, NeziaEntityId source, byte looping);
 
         /// <summary>
-        ///  Voice Virtualization 用優先度を設定する (Unity `AudioSource.priority` 互換)。
+        ///  Voice Virtualization 用優先度を設定する (Wwise / CRI ADX2 互換)。
         ///
-        ///  0..255、低いほど高優先。既定 128。
+        ///  0..255、**高いほど高優先**。既定 128 (中央値)。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_source_set_priority", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern NeziaResult nezia_source_set_priority(NeziaEngine* engine, NeziaEntityId source, byte priority);
@@ -648,9 +648,13 @@ namespace Nezia.Native
         /// <summary>
         ///  Container から子を 1 つ選んでハンドル付きで再生する。
         ///  戻り値は **選ばれた 1 つの Source の `EntityId`** (Container ハンドルとは別)。
+        ///
+        ///  `callback` が `Some` のとき、自然終了時に `nezia_engine_poll_events()` 経由で
+        ///  1 度だけ呼ばれる (`looping != 0` の場合は呼ばれない)。`user_data` のライフタイムは
+        ///  コールバック発火まで呼出側が保証する。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_container_play_with_handle", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern NeziaEntityId nezia_container_play_with_handle(NeziaEngine* engine, NeziaContainerId container, float vol, float pitch, NeziaEntityId bus, byte looping);
+        internal static extern NeziaEntityId nezia_container_play_with_handle(NeziaEngine* engine, NeziaContainerId container, float vol, float pitch, NeziaEntityId bus, byte looping, delegate* unmanaged[Cdecl]<void*, void> callback, void* user_data);
 
         /// <summary>
         ///  Custom Attenuation Curve を作成してハンドルを返す。
