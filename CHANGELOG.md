@@ -17,7 +17,10 @@
   - `NeziaAudioSource.dopplerLevel` — `AudioSource.dopplerLevel` 互換
     （`nezia_source_set_doppler_level`、SP-10）
   - `NeziaAudioSource.priority` — `AudioSource.priority` 互換
-    （`nezia_source_set_priority`、Phase 2-2 Voice Virtualization 用）
+    （`nezia_source_set_priority`、Phase 2-2 Voice Virtualization 用）。
+    ネイティブ層は Wwise / CRI ADX2 互換 (高い値=高優先) に切り替わったため、
+    統合層で `255 - unity_priority` を写像して FFI に渡す。
+    公開 API は Unity 標準 (0=最高) のまま維持
   - `NeziaAudioListener` がリスナー速度を自動算出して
     `nezia_listener_set_velocity` に publish
   - `NeziaAudioSource` がソース速度を自動算出して

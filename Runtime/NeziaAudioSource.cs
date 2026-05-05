@@ -175,10 +175,15 @@ namespace Nezia.Unity
         }
 
         /// <summary>
-        /// 再生優先度。<c>AudioSource.priority</c> 互換 (0=最高、255=最低)。
+        /// 再生優先度。<c>AudioSource.priority</c> 互換で 0=最高、255=最低 を維持する。
         /// Unity 標準は名目上 0..256 だが、Nezia ネイティブは <c>u8</c> なので
         /// 0..255 を 1 段階ずつ使い切る範囲に統一している。
         /// 範囲外の値は <see cref="Mathf.Clamp(int, int, int)"/> で 0..255 に切り詰められる。
+        ///
+        /// <para>
+        /// ネイティブ層は Wwise / CRI ADX2 互換 (高い値=高優先) に切り替わったため、
+        /// 統合層で <c>255 - unity_priority</c> で写像してから FFI に渡す。
+        /// </para>
         /// </summary>
         public unsafe int priority
         {
@@ -189,11 +194,14 @@ namespace Nezia.Unity
                 if (HasLiveSource)
                 {
                     var r = LibNezia.nezia_source_set_priority(
-                        NeziaEngine.RequireHandle(), _spawnedSource, (byte)_priority);
+                        NeziaEngine.RequireHandle(), _spawnedSource, ToNativePriority(_priority));
                     NeziaException.ThrowIfError(r, "set source priority");
                 }
             }
         }
+
+        // Unity (低い値=高優先) → ネイティブ Wwise/ADX2 (高い値=高優先) への写像。
+        private static byte ToNativePriority(int unityPriority) => (byte)(255 - unityPriority);
 
         /// <summary>起動時に自動再生するか。<c>AudioSource.playOnAwake</c> 互換。</summary>
         public bool playOnAwake { get => _playOnAwake; set => _playOnAwake = value; }
@@ -306,7 +314,7 @@ namespace Nezia.Unity
             _hasPrevPosition = false;
 
             var prResult = LibNezia.nezia_source_set_priority(
-                engine, src, (byte)_priority);
+                engine, src, ToNativePriority(_priority));
             NeziaException.ThrowIfError(prResult, "set source priority");
 
             if (_spatialBlend > 0f)
