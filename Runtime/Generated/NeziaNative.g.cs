@@ -427,6 +427,36 @@ namespace Nezia.Native
         internal static extern NeziaResult nezia_audio_peek_metadata(byte* bytes_ptr, nuint bytes_len, NeziaAudioMetadata* out_metadata);
 
         /// <summary>
+        ///  バス / ソースのチェーン末尾にエフェクトを追加する。
+        ///
+        ///  戻り値: 有効な `NeziaEntityId` (= EffectId) または `INVALID`。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_effect_add", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaEntityId nezia_effect_add(NeziaEngine* engine, NeziaEffectTargetKind target_kind, NeziaEntityId bus_or_source, NeziaEffectKind kind, NeziaEffectPosition position);
+
+        /// <summary>
+        ///  エフェクトを削除する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_effect_remove", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_effect_remove(NeziaEngine* engine, NeziaEntityId effect);
+
+        /// <summary>
+        ///  エフェクトの enabled をトグルする。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_effect_set_enabled", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_effect_set_enabled(NeziaEngine* engine, NeziaEntityId effect, byte enabled);
+
+        /// <summary>
+        ///  エフェクトパラメータを設定する。
+        ///
+        ///  `param` は種別ごとに以下を意味する:
+        ///  - LPF / HPF: 0=Cutoff (Hz), 1=Q
+        ///  - Reverb: 0=RoomSize, 1=Damping, 2=Wet, 3=Dry, 4=Width (すべて [0.0, 1.0] 正規化値)
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_effect_set_param", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_effect_set_param(NeziaEngine* engine, NeziaEntityId effect, byte param, float value);
+
+        /// <summary>
         ///  マスター出力キャプチャを有効化し、リーダーハンドルを返す。
         ///
         ///  戻り値: 成功時はハンドル、二重 enable / engine NULL 時は NULL。
@@ -495,6 +525,183 @@ namespace Nezia.Native
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_capture_reader_read", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern ulong nezia_capture_reader_read(NeziaCaptureReader* reader, float* dst_ptr, nuint dst_len);
+
+        /// <summary>
+        ///  バス → バスの Send を作成する。失敗時は `INVALID`。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_send_add_bus_to_bus", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaSendId nezia_send_add_bus_to_bus(NeziaEngine* engine, NeziaEntityId src, NeziaEntityId dst, NeziaSendPosition position, float gain);
+
+        /// <summary>
+        ///  バス → Compressor sidechain 入力の Send を作成する。
+        ///  `compressor` は `nezia_effect_add` で生成した Compressor の EffectId。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_send_add_bus_to_compressor", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaSendId nezia_send_add_bus_to_compressor(NeziaEngine* engine, NeziaEntityId src, NeziaEntityId compressor, NeziaSendPosition position, float gain);
+
+        /// <summary>
+        ///  Send を削除する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_send_remove", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_send_remove(NeziaEngine* engine, NeziaSendId send);
+
+        /// <summary>
+        ///  Send の gain を設定する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_send_set_gain", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_send_set_gain(NeziaEngine* engine, NeziaSendId send, float gain);
+
+        /// <summary>
+        ///  Send のタップ位置 (Pre / Post-Fader) を変更する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_send_set_position", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_send_set_position(NeziaEngine* engine, NeziaSendId send, NeziaSendPosition position);
+
+        /// <summary>
+        ///  Compressor の sidechain 駆動を on/off する。
+        ///  `add_send_to_compressor` は内部で自動的に on にするため、後から off にしたいときに使う。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_compressor_bind_sidechain", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_compressor_bind_sidechain(NeziaEngine* engine, NeziaEntityId compressor, byte enabled);
+
+        /// <summary>
+        ///  新しい Snapshot ビルダーを開始する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_snapshot_builder_begin", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaSnapshotBuilder* nezia_snapshot_builder_begin();
+
+        /// <summary>
+        ///  バスの gain を Snapshot に追加する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_snapshot_builder_set_bus_gain", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void nezia_snapshot_builder_set_bus_gain(NeziaSnapshotBuilder* builder, NeziaEntityId bus, float gain);
+
+        /// <summary>
+        ///  バスのミュート状態を Snapshot に追加する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_snapshot_builder_set_bus_muted", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void nezia_snapshot_builder_set_bus_muted(NeziaSnapshotBuilder* builder, NeziaEntityId bus, byte muted);
+
+        /// <summary>
+        ///  Send の gain を Snapshot に追加する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_snapshot_builder_set_send_gain", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void nezia_snapshot_builder_set_send_gain(NeziaSnapshotBuilder* builder, NeziaSendId send, float gain);
+
+        /// <summary>
+        ///  エフェクトパラメータを Snapshot に追加する。
+        ///
+        ///  `kind` は `NeziaEffectKind` (Lpf=0 / Hpf=1 / Reverb=2 / Compressor=3)、
+        ///  `param` は種別ごとのパラメータインデックス (`nezia_effect_set_param` と同じ意味)。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_snapshot_builder_set_effect_param", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void nezia_snapshot_builder_set_effect_param(NeziaSnapshotBuilder* builder, NeziaEntityId effect, byte kind, byte param, float value);
+
+        /// <summary>
+        ///  Snapshot を commit してハンドルを返す。失敗時は `INVALID`。
+        ///  `builder` は呼出後に解放されるので二度と使わないこと (NULL も書き戻されないので
+        ///  呼出側は自前でポインタをクリアすること)。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_snapshot_builder_commit", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaSnapshotId nezia_snapshot_builder_commit(NeziaEngine* engine, NeziaSnapshotBuilder* builder);
+
+        /// <summary>
+        ///  `_begin` で取得した builder を commit せずに解放する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_snapshot_builder_cancel", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void nezia_snapshot_builder_cancel(NeziaSnapshotBuilder* builder);
+
+        /// <summary>
+        ///  Snapshot を破棄する (進行中の補間には影響しない)。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_snapshot_destroy", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_snapshot_destroy(NeziaEngine* engine, NeziaSnapshotId id);
+
+        /// <summary>
+        ///  Snapshot を `fade_seconds` かけて適用する (0.0 で即時)。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_snapshot_apply", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_snapshot_apply(NeziaEngine* engine, NeziaSnapshotId id, float fade_seconds);
+
+        /// <summary>
+        ///  Random Container を生成する。`children_ptr` は `BufferId` の配列。
+        ///  `children_len == 0` または容量超過で `INVALID` を返す。
+        ///
+        ///  # 安全性
+        ///  `children_ptr` は `children_len` 個の `NeziaBufferId` を読める有効領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_container_create_random", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaContainerId nezia_container_create_random(NeziaEngine* engine, NeziaBufferId* children_ptr, nuint children_len);
+
+        /// <summary>
+        ///  Container を破棄する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_container_destroy", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_container_destroy(NeziaEngine* engine, NeziaContainerId id);
+
+        /// <summary>
+        ///  Container から子を 1 つ選んで指定バスで再生する (fire-and-forget)。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_container_play", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_container_play(NeziaEngine* engine, NeziaContainerId container, float vol, float pitch, NeziaEntityId bus, byte looping);
+
+        /// <summary>
+        ///  Container から子を 1 つ選んでハンドル付きで再生する。
+        ///  戻り値は **選ばれた 1 つの Source の `EntityId`** (Container ハンドルとは別)。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_container_play_with_handle", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaEntityId nezia_container_play_with_handle(NeziaEngine* engine, NeziaContainerId container, float vol, float pitch, NeziaEntityId bus, byte looping);
+
+        /// <summary>
+        ///  Custom Attenuation Curve を作成してハンドルを返す。
+        ///
+        ///  `points` は `[0.0, 1.0]` の正規化距離に対応する uniform sample。内部で 64 サンプル
+        ///  LUT に再サンプリングされる。`points_len == 0` または容量超過で `INVALID`。
+        ///
+        ///  # 安全性
+        ///  `points_ptr` は `points_len` 個の `f32` を読める有効領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_attenuation_curve_create", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaAttenuationCurveId nezia_attenuation_curve_create(NeziaEngine* engine, float* points_ptr, nuint points_len);
+
+        /// <summary>
+        ///  Custom Attenuation Curve を破棄する。参照中のソースは silent fallback する。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_attenuation_curve_destroy", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_attenuation_curve_destroy(NeziaEngine* engine, NeziaAttenuationCurveId id);
+
+        /// <summary>
+        ///  ソースに Custom Attenuation Curve を割り当てる。
+        ///  `curve` に `INVALID` を渡すと curve を外す (silent fallback)。
+        ///  別途 `set_source_spatial_params` で `model = Custom` を設定する必要がある。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_set_attenuation_curve", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_set_attenuation_curve(NeziaEngine* engine, NeziaEntityId source, NeziaAttenuationCurveId curve);
+
+        /// <summary>
+        ///  オーディオファイルをストリーミング再生用にロードしてハンドルを返す。失敗時は `INVALID`。
+        ///
+        ///  # 引数
+        ///  - `path_ptr` / `path_len`: UTF-8 のファイルパス。NUL 終端は不要。
+        ///  - `opts`: ストリーミングオプション。`{ buffer_seconds: 1.0 }` を渡せばデフォルト相当。
+        ///
+        ///  # 安全性
+        ///  `path_ptr` は `path_len` バイト読める有効領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_buffer_load_streaming", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaBufferId nezia_buffer_load_streaming(NeziaEngine* engine, byte* path_ptr, nuint path_len, NeziaStreamingOpts opts);
+
+        /// <summary>
+        ///  ストリーミングバッファをシークする。静的バッファに対しては no-op。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_buffer_seek_streaming", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void nezia_buffer_seek_streaming(NeziaEngine* engine, NeziaBufferId buffer, ulong frame_offset);
+
+        /// <summary>
+        ///  ストリーミングバッファのループフラグを設定する。静的バッファに対しては no-op。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_buffer_set_streaming_loop", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void nezia_buffer_set_streaming_loop(NeziaEngine* engine, NeziaBufferId buffer, byte looping);
 
 
     }
@@ -595,6 +802,70 @@ namespace Nezia.Native
     {
     }
 
+    /// <summary>
+    ///  Send 識別ハンドル (`core::SendId` の ABI ミラー)。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaSendId
+    {
+        public uint index;
+        public uint generation;
+    }
+
+    /// <summary>
+    ///  Snapshot ハンドル (`core::SnapshotId` の ABI ミラー)。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaSnapshotId
+    {
+        public uint index;
+        public uint generation;
+    }
+
+    /// <summary>
+    ///  FFI 側で `commit` まで貯める中間バッファ。`Box::into_raw` で C 側に渡す不透明型。
+    ///
+    ///  core の `SnapshotBuilder&lt;'a&gt;` は engine への mut 借用を保持するが、FFI ABI 越しに
+    ///  その借用を引き回すのは難しい。代わりに値をすべて FFI 側で貯め、`commit` 時に
+    ///  engine の builder を立ち上げてフィールドを流し込む。意味論は同一。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaSnapshotBuilder
+    {
+    }
+
+    /// <summary>
+    ///  Container ハンドル (`core::ContainerId` の ABI ミラー)。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaContainerId
+    {
+        public uint index;
+        public uint generation;
+    }
+
+    /// <summary>
+    ///  Custom Attenuation Curve ハンドル (`core::AttenuationCurveId` の ABI ミラー)。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaAttenuationCurveId
+    {
+        public uint index;
+        public uint generation;
+    }
+
+    /// <summary>
+    ///  ストリーミングオプション (`core::StreamingOpts` の ABI ミラー)。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaStreamingOpts
+    {
+        /// <summary>
+        ///  リング容量の目安 (秒)。default 1.0。
+        /// </summary>
+        public float buffer_seconds;
+    }
+
 
     /// <summary>
     ///  API 結果コード。
@@ -655,6 +926,47 @@ namespace Nezia.Native
         Linear = 1,
         InverseDistance = 2,
         Exponential = 3,
+    }
+
+    /// <summary>
+    ///  エフェクト種別 (`core::EffectKind` の ABI ミラー)。
+    /// </summary>
+    internal enum NeziaEffectKind : byte
+    {
+        Lpf = 0,
+        Hpf = 1,
+        Reverb = 2,
+        Compressor = 3,
+    }
+
+    /// <summary>
+    ///  エフェクト挿入位置 (`core::EffectPosition` の ABI ミラー)。
+    ///  Bus: 0=Pre-Fader, 1=Post-Fader / Source: 0=Pre-Spatial, 1=Post-Spatial
+    /// </summary>
+    internal enum NeziaEffectPosition : byte
+    {
+        Pre = 0,
+        Post = 1,
+    }
+
+    /// <summary>
+    ///  エフェクト対象種別。`bus_or_source` の解釈を切り替える。
+    /// </summary>
+    internal enum NeziaEffectTargetKind : byte
+    {
+        Bus = 0,
+        Source = 1,
+    }
+
+    /// <summary>
+    ///  Send のタップ位置 (`core::SendPosition` の ABI ミラー)。
+    ///  Pre = Fader 適用前で tap (本線 mute / gain 0 でも流れる)。
+    ///  Post = Fader 適用後で tap (本線 mute なら Send もゼロ)。
+    /// </summary>
+    internal enum NeziaSendPosition : byte
+    {
+        Pre = 0,
+        Post = 1,
     }
 
 
