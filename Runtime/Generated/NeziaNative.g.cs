@@ -209,9 +209,9 @@ namespace Nezia.Native
         internal static extern NeziaResult nezia_source_set_loop(NeziaEngine* engine, NeziaEntityId source, byte looping);
 
         /// <summary>
-        ///  Voice Virtualization 用優先度を設定する (Unity `AudioSource.priority` 互換)。
+        ///  Voice Virtualization 用優先度を設定する (Wwise / CRI ADX2 互換)。
         ///
-        ///  0..255、低いほど高優先。既定 128。
+        ///  0..255、**高いほど高優先**。既定 128 (中央値)。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_source_set_priority", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern NeziaResult nezia_source_set_priority(NeziaEngine* engine, NeziaEntityId source, byte priority);
@@ -926,6 +926,12 @@ namespace Nezia.Native
         Linear = 1,
         InverseDistance = 2,
         Exponential = 3,
+        /// <summary>
+        ///  Custom Attenuation Curve (Phase 3-1)。
+        ///  `nezia_source_set_attenuation_curve` で割り当てた curve を距離→ゲイン変換に使う。
+        ///  curve 未設定または curve 破棄済みの場合は silent (gain=0) フォールバックする。
+        /// </summary>
+        Custom = 4,
     }
 
     /// <summary>
