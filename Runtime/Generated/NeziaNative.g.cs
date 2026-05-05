@@ -426,6 +426,76 @@ namespace Nezia.Native
         [DllImport(__DllName, EntryPoint = "nezia_audio_peek_metadata", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern NeziaResult nezia_audio_peek_metadata(byte* bytes_ptr, nuint bytes_len, NeziaAudioMetadata* out_metadata);
 
+        /// <summary>
+        ///  マスター出力キャプチャを有効化し、リーダーハンドルを返す。
+        ///
+        ///  戻り値: 成功時はハンドル、二重 enable / engine NULL 時は NULL。
+        ///  ハンドルは最終的に `nezia_capture_reader_close` で解放すること。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_engine_enable_master_capture", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaCaptureReader* nezia_engine_enable_master_capture(NeziaEngine* engine);
+
+        /// <summary>
+        ///  マスター出力キャプチャを無効化する。リーダーは引き続き残量 drain に使ってよい。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_engine_disable_master_capture", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void nezia_engine_disable_master_capture(NeziaEngine* engine);
+
+        /// <summary>
+        ///  出力フォーマットを取得する。引数ポインタは NULL 可 (NULL は無視)。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_engine_output_format", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void nezia_engine_output_format(NeziaEngine* engine, uint* out_sample_rate, ushort* out_channels);
+
+        /// <summary>
+        ///  エンジン起動以降の累積処理フレーム数 (per-channel sample count) を返す。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_engine_dsp_time_samples", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong nezia_engine_dsp_time_samples(NeziaEngine* engine);
+
+        /// <summary>
+        ///  `nezia_engine_dsp_time_samples` を秒に換算した値。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_engine_dsp_time_seconds", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern double nezia_engine_dsp_time_seconds(NeziaEngine* engine);
+
+        /// <summary>
+        ///  キャプチャリーダーを閉じる。NULL は無視。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_capture_reader_close", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void nezia_capture_reader_close(NeziaCaptureReader* reader);
+
+        /// <summary>
+        ///  サンプルレート (Hz) を返す。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_capture_reader_sample_rate", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern uint nezia_capture_reader_sample_rate(NeziaCaptureReader* reader);
+
+        /// <summary>
+        ///  チャンネル数を返す。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_capture_reader_channels", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ushort nezia_capture_reader_channels(NeziaCaptureReader* reader);
+
+        /// <summary>
+        ///  起動以降の累積ドロップサンプル数を返す。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_capture_reader_dropped_samples", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong nezia_capture_reader_dropped_samples(NeziaCaptureReader* reader);
+
+        /// <summary>
+        ///  インターリーブ PCM を `dst` に最大 `dst_len` サンプル書き込む。戻り値: 実書き込みサンプル数。
+        ///
+        ///  任意スレッドから呼んでよい (lock-free SPSC)。`dst_len` は `channels` の倍数を想定するが、
+        ///  リング側は要素単位で動作するため端数が出ることがある (フレーム揃えしたい場合は呼出側で
+        ///  `dst_len` を `channels` の倍数にしておくこと)。
+        ///
+        ///  # 安全性
+        ///  `dst_ptr` は `dst_len` 個の `f32` を書ける有効領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_capture_reader_read", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong nezia_capture_reader_read(NeziaCaptureReader* reader, float* dst_ptr, nuint dst_len);
+
 
     }
 
@@ -514,6 +584,14 @@ namespace Nezia.Native
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct NeziaBufferReader
+    {
+    }
+
+    /// <summary>
+    ///  `NeziaCaptureReader` 不透明ハンドル。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaCaptureReader
     {
     }
 
