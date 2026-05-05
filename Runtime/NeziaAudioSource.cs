@@ -35,6 +35,8 @@ namespace Nezia.Unity
         [SerializeField] private float _minDistance = 1f;
         [SerializeField] private float _maxDistance = 500f;
         [SerializeField] private NeziaRolloffMode _rolloffMode = NeziaRolloffMode.InverseDistance;
+        [SerializeField, Range(0f, 5f)] private float _dopplerLevel = 1f;
+        [SerializeField, Range(0, 256)] private int _priority = 128;
         [SerializeField] private AudioMixerGroup _outputAudioMixerGroup;
         [SerializeField] private NeziaBusMap _busMap;
 
@@ -139,6 +141,46 @@ namespace Nezia.Unity
 
         /// <summary>距離減衰モデル。</summary>
         public NeziaRolloffMode rolloffMode { get => _rolloffMode; set => _rolloffMode = value; }
+
+        /// <summary>
+        /// Doppler 効果の強度。<c>AudioSource.dopplerLevel</c> 互換。
+        /// Unity 同様 0〜5 の範囲。ネイティブ側は [0, 1] にクランプされる
+        /// （1.0 で物理計算を完全適用、0.0 で無効）。
+        /// </summary>
+        public unsafe float dopplerLevel
+        {
+            get => _dopplerLevel;
+            set
+            {
+                _dopplerLevel = Mathf.Clamp(value, 0f, 5f);
+                if (HasLiveSource)
+                {
+                    var r = LibNezia.nezia_source_set_doppler_level(
+                        NeziaEngine.RequireHandle(), _spawnedSource, _dopplerLevel);
+                    NeziaException.ThrowIfError(r, "set source doppler level");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 再生優先度。<c>AudioSource.priority</c> 互換 (0=最高, 256=最低)。
+        /// Nezia ネイティブは 0..255 を取るため 256 は 255 にクランプされる。
+        /// </summary>
+        public unsafe int priority
+        {
+            get => _priority;
+            set
+            {
+                _priority = Mathf.Clamp(value, 0, 256);
+                if (HasLiveSource)
+                {
+                    var r = LibNezia.nezia_source_set_priority(
+                        NeziaEngine.RequireHandle(), _spawnedSource,
+                        (byte)Mathf.Min(_priority, 255));
+                    NeziaException.ThrowIfError(r, "set source priority");
+                }
+            }
+        }
 
         /// <summary>起動時に自動再生するか。<c>AudioSource.playOnAwake</c> 互換。</summary>
         public bool playOnAwake { get => _playOnAwake; set => _playOnAwake = value; }
@@ -248,6 +290,12 @@ namespace Nezia.Unity
             _spawnedSource = src;
             _isPlaying = true;
             _isPaused = false;
+            _hasPrevPosition = false;
+
+            // 0..256 → 0..255 にクランプして適用（Unity の 256 は最低優先度）。
+            var prResult = LibNezia.nezia_source_set_priority(
+                engine, src, (byte)Mathf.Min(_priority, 255));
+            NeziaException.ThrowIfError(prResult, "set source priority");
 
             if (_spatialBlend > 0f)
             {
@@ -257,6 +305,9 @@ namespace Nezia.Unity
 
                 r = LibNezia.nezia_source_set_spatial_enabled(engine, src, 1);
                 NeziaException.ThrowIfError(r, "set spatial enabled");
+
+                r = LibNezia.nezia_source_set_doppler_level(engine, src, _dopplerLevel);
+                NeziaException.ThrowIfError(r, "set source doppler level");
 
                 PushPosition();
             }
@@ -338,7 +389,7 @@ namespace Nezia.Unity
 
         private void LateUpdate()
         {
-            if (_isPlaying && !_isPaused && _spatialBlend > 0f) PushPosition();
+            if (_isPlaying && !_isPaused && _spatialBlend > 0f) PushPositionAndVelocity();
         }
 
         private void OnEnable()
@@ -348,6 +399,7 @@ namespace Nezia.Unity
             _spawnedSource = InvalidEntityId;
             _isPlaying = false;
             _isPaused = false;
+            _hasPrevPosition = false;
         }
 
         private void OnDisable() => Stop();
@@ -413,6 +465,11 @@ namespace Nezia.Unity
             if (_destroyOnFinish && this != null) Destroy(gameObject);
         }
 
+        // 速度（Doppler 用）は前フレーム位置との差分を Time.deltaTime で割って自動算出する。
+        // ユーザーが明示的に Rigidbody.velocity 等を渡すフックは現状用意していない。
+        private Vector3 _prevPosition;
+        private bool _hasPrevPosition;
+
         private void PushPosition()
         {
             if (!HasLiveSource) return;
@@ -421,6 +478,27 @@ namespace Nezia.Unity
             {
                 source = _spawnedSource,
                 position = new NeziaVec3 { x = p.x, y = p.y, z = p.z },
+            });
+        }
+
+        private void PushPositionAndVelocity()
+        {
+            if (!HasLiveSource) return;
+            var p = transform.position;
+            EnqueuePendingPosition(new NeziaSourcePositionUpdate
+            {
+                source = _spawnedSource,
+                position = new NeziaVec3 { x = p.x, y = p.y, z = p.z },
+            });
+
+            var dt = Time.deltaTime;
+            var v = (_hasPrevPosition && dt > 0f) ? (p - _prevPosition) / dt : Vector3.zero;
+            _prevPosition = p;
+            _hasPrevPosition = true;
+            EnqueuePendingVelocity(new NeziaSourceVelocityUpdate
+            {
+                source = _spawnedSource,
+                velocity = new NeziaVec3 { x = v.x, y = v.y, z = v.z },
             });
         }
 
@@ -433,6 +511,8 @@ namespace Nezia.Unity
 
         private static NeziaSourcePositionUpdate[] s_pendingPositions = new NeziaSourcePositionUpdate[64];
         private static int s_pendingPositionCount;
+        private static NeziaSourceVelocityUpdate[] s_pendingVelocities = new NeziaSourceVelocityUpdate[64];
+        private static int s_pendingVelocityCount;
 
         private static void EnqueuePendingPosition(NeziaSourcePositionUpdate update)
         {
@@ -441,22 +521,43 @@ namespace Nezia.Unity
             s_pendingPositions[s_pendingPositionCount++] = update;
         }
 
+        private static void EnqueuePendingVelocity(NeziaSourceVelocityUpdate update)
+        {
+            if (s_pendingVelocityCount == s_pendingVelocities.Length)
+                Array.Resize(ref s_pendingVelocities, s_pendingVelocities.Length * 2);
+            s_pendingVelocities[s_pendingVelocityCount++] = update;
+        }
+
         internal static unsafe void FlushPendingPositions()
         {
-            if (s_pendingPositionCount == 0) return;
             if (!NeziaEngine.IsInitialized)
             {
                 s_pendingPositionCount = 0;
+                s_pendingVelocityCount = 0;
                 return;
             }
 
-            fixed (NeziaSourcePositionUpdate* ptr = s_pendingPositions)
+            if (s_pendingPositionCount > 0)
             {
-                var r = LibNezia.nezia_source_batch_set_positions(
-                    NeziaEngine.RequireHandle(), ptr, (nuint)s_pendingPositionCount);
-                NeziaException.ThrowIfError(r, "batch set source positions");
+                fixed (NeziaSourcePositionUpdate* ptr = s_pendingPositions)
+                {
+                    var r = LibNezia.nezia_source_batch_set_positions(
+                        NeziaEngine.RequireHandle(), ptr, (nuint)s_pendingPositionCount);
+                    NeziaException.ThrowIfError(r, "batch set source positions");
+                }
+                s_pendingPositionCount = 0;
             }
-            s_pendingPositionCount = 0;
+
+            if (s_pendingVelocityCount > 0)
+            {
+                fixed (NeziaSourceVelocityUpdate* ptr = s_pendingVelocities)
+                {
+                    var r = LibNezia.nezia_source_batch_set_velocities(
+                        NeziaEngine.RequireHandle(), ptr, (nuint)s_pendingVelocityCount);
+                    NeziaException.ThrowIfError(r, "batch set source velocities");
+                }
+                s_pendingVelocityCount = 0;
+            }
         }
     }
 }
