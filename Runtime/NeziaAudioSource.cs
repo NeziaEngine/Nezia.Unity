@@ -35,6 +35,7 @@ namespace Nezia.Unity
         [SerializeField] private float _minDistance = 1f;
         [SerializeField] private float _maxDistance = 500f;
         [SerializeField] private NeziaRolloffMode _rolloffMode = NeziaRolloffMode.InverseDistance;
+        [SerializeField] private NeziaAttenuationCurveAsset _attenuationCurve;
         [SerializeField, Range(0f, 5f)] private float _dopplerLevel = 1f;
         [SerializeField, Range(0, 255)] private int _priority = 128;
         [SerializeField] private AudioMixerGroup _outputAudioMixerGroup;
@@ -55,7 +56,18 @@ namespace Nezia.Unity
         // 自然終了（コールバック発火）または明示 Stop で必ず Free する。
         private GCHandle _selfHandle;
 
+        // Inspector で AnimationCurve として編集された減衰カーブを再生中だけネイティブ確保しておく。
+        // Play で生成 → Stop / 自然終了 / Disable で Destroy する。
+        private NeziaAttenuationCurve _liveAttenuationCurve = NeziaAttenuationCurve.Invalid;
+
         private bool HasLiveSource => _spawnedSource.index != uint.MaxValue;
+
+        /// <summary>カスタム距離減衰カーブのアセット。未設定なら <see cref="rolloffMode"/> が使われる。</summary>
+        public NeziaAttenuationCurveAsset attenuationCurve
+        {
+            get => _attenuationCurve;
+            set => _attenuationCurve = value;
+        }
 
         // ─── AudioSource 互換 API ────────────────────────────────
 
@@ -309,6 +321,17 @@ namespace Nezia.Unity
                 r = LibNezia.nezia_source_set_doppler_level(engine, src, _dopplerLevel);
                 NeziaException.ThrowIfError(r, "set source doppler level");
 
+                if (_attenuationCurve != null)
+                {
+                    _liveAttenuationCurve = _attenuationCurve.ToNative();
+                    if (_liveAttenuationCurve.IsValid)
+                    {
+                        var cr = LibNezia.nezia_source_set_attenuation_curve(
+                            engine, src, _liveAttenuationCurve.Id);
+                        NeziaException.ThrowIfError(cr, "set source attenuation curve");
+                    }
+                }
+
                 PushPosition();
             }
             else
@@ -452,6 +475,14 @@ namespace Nezia.Unity
             _isPaused = false;
             // 明示 Stop の場合は SourceFinished が発火しないので、ここで Free する。
             FreeSelfHandle();
+            DestroyLiveAttenuationCurve();
+        }
+
+        private void DestroyLiveAttenuationCurve()
+        {
+            if (!_liveAttenuationCurve.IsValid) return;
+            if (NeziaEngine.IsInitialized) _liveAttenuationCurve.Destroy();
+            _liveAttenuationCurve = NeziaAttenuationCurve.Invalid;
         }
 
         private void FreeSelfHandle()
@@ -491,6 +522,7 @@ namespace Nezia.Unity
             _isPlaying = false;
             _isPaused = false;
             _selfHandle = default; // 呼び出し元 (OnNativeFinishedStatic) が Free する。
+            DestroyLiveAttenuationCurve();
 
             if (_destroyOnFinish && this != null) Destroy(gameObject);
         }

@@ -37,6 +37,11 @@
   - `NeziaRandomContainer` — 子バッファから 1 つを擬似ランダムに選んで再生
   - `NeziaAttenuationCurve` + `NeziaAudioSource.SetAttenuationCurve` —
     カスタム距離減衰カーブ（`AnimationCurve` 相当）
+  - `NeziaAttenuationCurveAsset` (`ScriptableObject` / `CreateAssetMenu`) —
+    Inspector の `AnimationCurve` エディタで編集できるカーブアセット。
+    `NeziaAudioSource._attenuationCurve` で割り当てると `Play()` 時に
+    自動でサンプリングしてネイティブ確保、`Stop` / 自然終了 / `OnDisable`
+    で破棄する
   - `NeziaBuffer.LoadStreaming` / `SeekStreaming` / `SetStreamingLoop` —
     巨大 BGM をフルデコードせずに再生
   - `NeziaMasterCapture` (`IDisposable`) と
