@@ -68,6 +68,28 @@
     `NeziaEngine.EnableMasterCapture` / `DisableMasterCapture` — マスター出力 tap
   - `NeziaEngine.OutputSampleRate` / `OutputChannels` /
     `DspTime` / `DspTimeSamples` — `AudioSettings.dspTime` 相当
+- `NeziaWavRecorder` (`IDisposable`) — `NeziaMasterCapture` を background
+  thread で drain して Nezia マスター出力を 32-bit float WAV に書き出す
+  ユーティリティ。Unity Recorder は Unity の AudioListener 経路しか録音
+  できないため、Nezia の独立 DSP 出力をオフライン視聴用に保存する経路を
+  提供する。`NeziaWavRecorder.Start(path)` / `Stop()` で開始・終了し、
+  ヘッダの RIFF / fact / data 長は停止時にパッチする
+- `NeziaEngine.Generation` — `Initialize` ごとに増えるエンジン世代カウンタ。
+  ScriptableObject 側のネイティブハンドル・キャッシュが「現在のエンジン世代の
+  ものか」を判定するためのフック
+
+### Fixed
+
+- Enter Play Mode Settings の "Reload Domain" を OFF にしている場合、
+  2 回目以降の Play で `NeziaAudioClip` / `NeziaRandomContainer` /
+  `NeziaBusMap` が無音 / 無効ハンドルになる問題を修正。Domain Reload オフ
+  だと SO の `OnEnable` / `OnDisable` がプレイセッションをまたいで呼ばれず、
+  `Application.quitting` で破棄された旧エンジンの BufferId / ContainerId /
+  Bus ID をキャッシュし続けて新エンジンに対して使ってしまっていた。
+  `NeziaEngine.Generation` を併せて記録し、世代不一致時にキャッシュを
+  自動破棄して再ロードするように変更（ビルドではエンジンが一度しか
+  初期化されないため、SO 側の世代チェックは `#if UNITY_EDITOR` で
+  除外しランタイムにオーバーヘッドを与えない）
 
 ## [0.1.0] - 2026-05-02
 

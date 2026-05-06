@@ -25,10 +25,15 @@ namespace Nezia.Unity
     {
         [SerializeField] internal NeziaSoundAsset[] children;
 
-        // ネイティブハンドル。Domain Reload / アプリ再起動でエンジンが作り直されると
-        // 無効になるため、OnEnable でクリアして次の Spawn 時に再 resolve する。
+        // ネイティブハンドル。エンジンが作り直されると無効になる。
+        // Domain Reload オン時は OnEnable で、オフ時 (Editor 限定) は _resolvedGeneration の
+        // 不一致で検知して次の Spawn 時に再 resolve する。ビルドではエンジンが一度しか
+        // 初期化されないので #if UNITY_EDITOR で除外する。
         private NeziaContainerId _containerId;
         private bool _resolved;
+#if UNITY_EDITOR
+        private int _resolvedGeneration;
+#endif
 
         /// <summary>子アセットの読み取り専用ビュー。</summary>
         public IReadOnlyList<NeziaSoundAsset> Children => children;
@@ -95,6 +100,15 @@ namespace Nezia.Unity
 
         internal unsafe void Resolve(Nezia.Native.NeziaEngine* engine)
         {
+#if UNITY_EDITOR
+            // 世代不一致 = 旧エンジンの ContainerId を保持している。旧エンジンは free 済みなので
+            // destroy は呼ばずにフィールドだけリセットする。
+            if (_resolved && _resolvedGeneration != NeziaEngine.Generation)
+            {
+                _containerId = default;
+                _resolved = false;
+            }
+#endif
             if (_resolved) return;
             if (children == null || children.Length == 0)
             {
@@ -133,6 +147,9 @@ namespace Nezia.Unity
                 _containerId = LibNezia.nezia_container_create_random(engine, p, (nuint)idArray.Length);
             }
             _resolved = _containerId.index != uint.MaxValue;
+#if UNITY_EDITOR
+            _resolvedGeneration = NeziaEngine.Generation;
+#endif
             if (!_resolved)
                 Debug.LogWarning($"[Nezia] {name}: nezia_container_create_random returned INVALID.", this);
         }

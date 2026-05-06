@@ -18,9 +18,24 @@ namespace Nezia.Unity
         private static unsafe global::Nezia.Native.NeziaEngine* s_handle;
         private static bool s_initialized;
         private static GameObject s_pumpObject;
+        private static int s_generation;
 
         /// <summary>エンジンが初期化済みか。</summary>
         public static bool IsInitialized => s_initialized;
+
+        /// <summary>
+        /// ネイティブエンジンの世代番号。<see cref="Initialize"/> ごとにインクリメントされ、
+        /// 0 はまだ一度も初期化されていない状態を示す。
+        ///
+        /// <para>
+        /// ScriptableObject にキャッシュしたネイティブハンドル（BufferId / ContainerId / Bus 等）が
+        /// 「現在のエンジン世代のものか」を判定するために使う。Enter Play Mode Settings の
+        /// "Reload Domain" を OFF にしていると <c>OnEnable</c> / <c>OnDisable</c> が
+        /// プレイセッションをまたいで呼ばれず、SO 側のキャッシュが旧エンジンの無効な ID を
+        /// 持ち越してしまう。世代不一致を検知して再ロードさせるためのフックがこの値。
+        /// </para>
+        /// </summary>
+        public static int Generation => s_generation;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void AutoInitialize()
@@ -41,6 +56,7 @@ namespace Nezia.Unity
                 throw new InvalidOperationException("[Nezia] nezia_engine_new returned NULL");
 
             s_initialized = true;
+            s_generation++;
 
             s_pumpObject = new GameObject("[Nezia Engine Pump]") { hideFlags = HideFlags.HideAndDontSave };
             UnityEngine.Object.DontDestroyOnLoad(s_pumpObject);
