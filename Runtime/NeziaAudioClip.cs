@@ -25,11 +25,17 @@ namespace Nezia.Unity
 
         // ネイティブの BufferId は (0, 0) も有効値 (最初に確保されるスロット) なので、
         // 「バッファをロード済みか」の判定を ID の sentinel 比較に頼らず、明示的な bool で持つ。
-        // Domain Reload / Editor 再起動でネイティブエンジンが作り直されるとキャッシュした
-        // BufferId は無効になるが、Unity は DR 後に必ず ScriptableObject.OnEnable を呼ぶので、
-        // そこで _bufferLoaded を false に倒すだけでキャッシュが自動破棄される。
+        // ネイティブエンジンが作り直されるとキャッシュした BufferId は無効になる。
+        // Domain Reload オンの場合は OnEnable がキャッシュをクリアするが、Enter Play Mode で
+        // Reload Domain がオフだと OnEnable / OnDisable がプレイセッションをまたいで呼ばれない。
+        // そのため Editor 限定で _bufferGeneration に NeziaEngine.Generation を併せて記録し、
+        // GetOrLoadBuffer の頭で世代不一致を検知して再ロードさせる。ビルドではエンジンが
+        // 一度しか初期化されないため、この判定は不要なので #if UNITY_EDITOR で除外する。
         private NeziaBuffer _buffer;
         private bool _bufferLoaded;
+#if UNITY_EDITOR
+        private int _bufferGeneration;
+#endif
 
         /// <summary>このクリップの長さ（秒）。メタデータが揃っていない場合は 0。</summary>
         public override float Length => sampleRate > 0 ? (float)totalSamples / sampleRate : 0f;
@@ -60,6 +66,19 @@ namespace Nezia.Unity
         /// </summary>
         public unsafe NeziaBuffer GetOrLoadBuffer()
         {
+#if UNITY_EDITOR
+            // 世代不一致 = 旧エンジンに発行された BufferId を保持している状態。
+            // 旧エンジンは既に free 済みでハンドルもろとも消えているので、
+            // unload は呼ばずにフィールドだけリセットして再ロードに回す。
+            if (_bufferLoaded && _bufferGeneration != NeziaEngine.Generation)
+            {
+                _buffer = NeziaBuffer.Invalid;
+                _bufferLoaded = false;
+                if (_proxyReader != null) { _proxyReader.Dispose(); _proxyReader = null; }
+                _proxyClip = null;
+            }
+#endif
+
             if (_bufferLoaded) return _buffer;
             if (encodedBytes == null || encodedBytes.Length == 0)
                 return NeziaBuffer.Invalid;
@@ -71,6 +90,9 @@ namespace Nezia.Unity
                 _buffer = new NeziaBuffer(id);
             }
             _bufferLoaded = _buffer.IsValid;
+#if UNITY_EDITOR
+            _bufferGeneration = NeziaEngine.Generation;
+#endif
             return _buffer;
         }
 

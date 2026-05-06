@@ -34,6 +34,9 @@ namespace Nezia.Unity
         [SerializeField] private List<Entry> entries = new();
 
         private readonly Dictionary<AudioMixerGroup, NeziaBus> _resolved = new();
+#if UNITY_EDITOR
+        private int _resolvedGeneration;
+#endif
 
         /// <summary>
         /// 指定 MixerGroup に対応する <see cref="NeziaBus"/> を返す。
@@ -43,6 +46,14 @@ namespace Nezia.Unity
         public NeziaBus Resolve(AudioMixerGroup group)
         {
             if (group == null) return NeziaBus.Invalid;
+
+#if UNITY_EDITOR
+            // 世代不一致 = 旧エンジンが発行した Bus ID。旧エンジンは free 済みなので捨てるだけ。
+            // ビルドではエンジンが一度しか初期化されないので #if UNITY_EDITOR で除外する。
+            if (_resolved.Count > 0 && _resolvedGeneration != NeziaEngine.Generation)
+                _resolved.Clear();
+#endif
+
             if (_resolved.TryGetValue(group, out var cached)) return cached;
 
             foreach (var e in entries)
@@ -50,6 +61,9 @@ namespace Nezia.Unity
                 if (e.mixerGroup != group) continue;
                 var bus = NeziaBus.Create(e.gain);
                 _resolved[group] = bus;
+#if UNITY_EDITOR
+                _resolvedGeneration = NeziaEngine.Generation;
+#endif
                 return bus;
             }
             return NeziaBus.Invalid;
