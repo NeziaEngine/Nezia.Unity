@@ -55,21 +55,6 @@ namespace Nezia.Unity
             }
         }
 
-        /// <summary>
-        /// パラメータを設定する。<paramref name="param"/> の意味は <see cref="NeziaEffectKind"/> 参照。
-        ///
-        /// <para>
-        /// 通常は <see cref="AsLowPass"/> / <see cref="AsHighPass"/> / <see cref="AsReverb"/> /
-        /// <see cref="AsCompressor"/> 経由の名前付きプロパティを使うこと。
-        /// この生 API は internal/互換用に残されている。
-        /// </para>
-        /// </summary>
-        [Obsolete("Prefer typed wrappers via AsLowPass()/AsHighPass()/AsReverb()/AsCompressor(). This raw API will become internal in a future release.")]
-        public unsafe void SetParam(byte param, float value)
-        {
-            SetParamUnchecked(param, value);
-        }
-
         internal unsafe void SetParamUnchecked(byte param, float value)
         {
             var r = LibNezia.nezia_effect_set_param(NeziaEngine.RequireHandle(), Id, param, value);

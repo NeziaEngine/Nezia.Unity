@@ -18,10 +18,10 @@
     `Ratio` / `AttackMs` / `ReleaseMs` / `KneeDb` / `MakeupDb`)
   - kind が一致しない場合 `AsXxx()` は `InvalidOperationException` を投げる
 
-### Deprecated
+### Removed
 
-- `NeziaEffect.SetParam(byte param, float value)` — `[Obsolete]`。
-  上記 type-safe ラッパに置き換え推奨。将来的に internal 化予定。
+- `NeziaEffect.SetParam(byte param, float value)` — public API から削除。
+  上記 type-safe ラッパ経由でアクセスすること（内部 `SetParamUnchecked` に統合）。
 
 - nezia-core の新規 FFI に追従:
   - `NeziaEngine.SoundSpeed` — `nezia_set_sound_speed`（媒質中の音速、Unity の
