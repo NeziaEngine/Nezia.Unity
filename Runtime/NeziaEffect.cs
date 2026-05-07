@@ -57,11 +57,66 @@ namespace Nezia.Unity
 
         /// <summary>
         /// パラメータを設定する。<paramref name="param"/> の意味は <see cref="NeziaEffectKind"/> 参照。
+        ///
+        /// <para>
+        /// 通常は <see cref="AsLowPass"/> / <see cref="AsHighPass"/> / <see cref="AsReverb"/> /
+        /// <see cref="AsCompressor"/> 経由の名前付きプロパティを使うこと。
+        /// この生 API は internal/互換用に残されている。
+        /// </para>
         /// </summary>
+        [Obsolete("Prefer typed wrappers via AsLowPass()/AsHighPass()/AsReverb()/AsCompressor(). This raw API will become internal in a future release.")]
         public unsafe void SetParam(byte param, float value)
+        {
+            SetParamUnchecked(param, value);
+        }
+
+        internal unsafe void SetParamUnchecked(byte param, float value)
         {
             var r = LibNezia.nezia_effect_set_param(NeziaEngine.RequireHandle(), Id, param, value);
             NeziaException.ThrowIfError(r, "effect set param");
+        }
+
+        /// <summary>
+        /// LowPass 用の型安全ラッパ。<see cref="Kind"/> が <see cref="NeziaEffectKind.LowPass"/>
+        /// でない場合は <see cref="InvalidOperationException"/> を投げる。
+        /// </summary>
+        public NeziaLowPassEffect AsLowPass()
+        {
+            EnsureKind(NeziaEffectKind.LowPass);
+            return new NeziaLowPassEffect(this);
+        }
+
+        /// <summary>
+        /// HighPass 用の型安全ラッパ。
+        /// </summary>
+        public NeziaHighPassEffect AsHighPass()
+        {
+            EnsureKind(NeziaEffectKind.HighPass);
+            return new NeziaHighPassEffect(this);
+        }
+
+        /// <summary>
+        /// Reverb 用の型安全ラッパ。
+        /// </summary>
+        public NeziaReverbEffect AsReverb()
+        {
+            EnsureKind(NeziaEffectKind.Reverb);
+            return new NeziaReverbEffect(this);
+        }
+
+        /// <summary>
+        /// Compressor 用の型安全ラッパ。
+        /// </summary>
+        public NeziaCompressorEffect AsCompressor()
+        {
+            EnsureKind(NeziaEffectKind.Compressor);
+            return new NeziaCompressorEffect(this);
+        }
+
+        private void EnsureKind(NeziaEffectKind expected)
+        {
+            if (Kind != expected)
+                throw new InvalidOperationException($"[Nezia] Effect kind mismatch: expected {expected}, but is {Kind}.");
         }
 
         /// <summary>このエフェクトをチェーンから取り外して破棄する。</summary>
@@ -77,5 +132,74 @@ namespace Nezia.Unity
         public override int GetHashCode() => unchecked((int)(Id.index * 397 ^ Id.generation));
         public static bool operator ==(NeziaEffect a, NeziaEffect b) => a.Equals(b);
         public static bool operator !=(NeziaEffect a, NeziaEffect b) => !a.Equals(b);
+    }
+
+    /// <summary>
+    /// LowPass フィルタの型安全ビュー。<see cref="NeziaEffect.AsLowPass"/> から取得する。
+    /// 値域: <see cref="Cutoff"/> Hz, <see cref="Q"/> 共振係数。
+    /// </summary>
+    public readonly struct NeziaLowPassEffect
+    {
+        public readonly NeziaEffect Effect;
+        internal NeziaLowPassEffect(NeziaEffect effect) { Effect = effect; }
+
+        /// <summary>カットオフ周波数 (Hz)。</summary>
+        public float Cutoff { set => Effect.SetParamUnchecked(0, value); }
+        /// <summary>共振係数 Q。</summary>
+        public float Q { set => Effect.SetParamUnchecked(1, value); }
+    }
+
+    /// <summary>
+    /// HighPass フィルタの型安全ビュー。<see cref="NeziaEffect.AsHighPass"/> から取得する。
+    /// </summary>
+    public readonly struct NeziaHighPassEffect
+    {
+        public readonly NeziaEffect Effect;
+        internal NeziaHighPassEffect(NeziaEffect effect) { Effect = effect; }
+
+        /// <summary>カットオフ周波数 (Hz)。</summary>
+        public float Cutoff { set => Effect.SetParamUnchecked(0, value); }
+        /// <summary>共振係数 Q。</summary>
+        public float Q { set => Effect.SetParamUnchecked(1, value); }
+    }
+
+    /// <summary>
+    /// Reverb の型安全ビュー。<see cref="NeziaEffect.AsReverb"/> から取得する。
+    /// すべて正規化値 [0.0, 1.0]。
+    /// </summary>
+    public readonly struct NeziaReverbEffect
+    {
+        public readonly NeziaEffect Effect;
+        internal NeziaReverbEffect(NeziaEffect effect) { Effect = effect; }
+
+        public float RoomSize { set => Effect.SetParamUnchecked(0, value); }
+        public float Damping { set => Effect.SetParamUnchecked(1, value); }
+        public float Wet { set => Effect.SetParamUnchecked(2, value); }
+        public float Dry { set => Effect.SetParamUnchecked(3, value); }
+        public float Width { set => Effect.SetParamUnchecked(4, value); }
+    }
+
+    /// <summary>
+    /// Compressor の型安全ビュー。<see cref="NeziaEffect.AsCompressor"/> から取得する。
+    /// sidechain 駆動は <see cref="NeziaSend.AddBusToCompressor"/> もしくは
+    /// <see cref="NeziaBus.BindCompressorSidechain"/> で別途制御する。
+    /// </summary>
+    public readonly struct NeziaCompressorEffect
+    {
+        public readonly NeziaEffect Effect;
+        internal NeziaCompressorEffect(NeziaEffect effect) { Effect = effect; }
+
+        /// <summary>圧縮開始 dB (例: -20.0)。</summary>
+        public float ThresholdDb { set => Effect.SetParamUnchecked(0, value); }
+        /// <summary>圧縮比。1.0 で無効、∞ で limiter。</summary>
+        public float Ratio { set => Effect.SetParamUnchecked(1, value); }
+        /// <summary>アタック ms (反応速度)。</summary>
+        public float AttackMs { set => Effect.SetParamUnchecked(2, value); }
+        /// <summary>リリース ms (回復速度)。</summary>
+        public float ReleaseMs { set => Effect.SetParamUnchecked(3, value); }
+        /// <summary>ソフトニー幅 dB (0 でハードニー)。</summary>
+        public float KneeDb { set => Effect.SetParamUnchecked(4, value); }
+        /// <summary>メイクアップゲイン dB。</summary>
+        public float MakeupDb { set => Effect.SetParamUnchecked(5, value); }
     }
 }
