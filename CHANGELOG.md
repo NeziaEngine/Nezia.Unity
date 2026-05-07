@@ -9,6 +9,20 @@
 
 ### Added
 
+- `NeziaEffect` に kind 別の type-safe ラッパを追加（IP-2）:
+  - `effect.AsLowPass()` → `NeziaLowPassEffect` (`Cutoff`, `Q`)
+  - `effect.AsHighPass()` → `NeziaHighPassEffect` (`Cutoff`, `Q`)
+  - `effect.AsReverb()` → `NeziaReverbEffect` (`RoomSize` / `Damping` /
+    `Wet` / `Dry` / `Width`、すべて [0, 1])
+  - `effect.AsCompressor()` → `NeziaCompressorEffect` (`ThresholdDb` /
+    `Ratio` / `AttackMs` / `ReleaseMs` / `KneeDb` / `MakeupDb`)
+  - kind が一致しない場合 `AsXxx()` は `InvalidOperationException` を投げる
+
+### Removed
+
+- `NeziaEffect.SetParam(byte param, float value)` — public API から削除。
+  上記 type-safe ラッパ経由でアクセスすること（内部 `SetParamUnchecked` に統合）。
+
 - nezia-core の新規 FFI に追従:
   - `NeziaEngine.SoundSpeed` — `nezia_set_sound_speed`（媒質中の音速、Unity の
     `AudioSettings.speedOfSound` 互換）

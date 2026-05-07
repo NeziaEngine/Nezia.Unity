@@ -254,7 +254,7 @@ EditorWindow で IP-1 のアセットや実行中の状態を可視化。
 | 項目 | 状態 | 担当 PR |
 |---|---|---|
 | IP-1 Mixer Asset | 未着手 | — |
-| IP-2 Effect type-safe | 未着手 | — |
+| IP-2 Effect type-safe | 実装済み (PR レビュー待ち) | — |
 | IP-3 Snapshot Asset | 未着手 | — |
 | IP-4 Asset Preview | 未着手 | — |
 | IP-5 Source Effect Slot | 未着手 | — |
