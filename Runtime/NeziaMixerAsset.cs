@@ -84,9 +84,11 @@ namespace Nezia.Unity
                 : NeziaBus.Invalid;
         }
 
+#if UNITY_EDITOR
         /// <summary>
-        /// ネイティブを触らずに構成を検証する。重複名・未知 parent・循環参照を文字列リストで返す。
-        /// 戻り値が空なら設定 OK。Inspector / テスト用。
+        /// (Editor 専用) ネイティブを触らずに構成を検証する。重複名 / 未知 parent /
+        /// 循環参照を文字列リストで返す。<see cref="OnValidate"/> から自動で呼ばれ、
+        /// 検出された問題は Console に warning として吐かれる。
         /// </summary>
         public List<string> Validate()
         {
@@ -127,6 +129,13 @@ namespace Nezia.Unity
             }
             return errors;
         }
+
+        private void OnValidate()
+        {
+            foreach (var err in Validate())
+                Debug.LogWarning($"[NeziaMixerAsset:{name}] {err}", this);
+        }
+#endif
 
         // ─── 内部 ────────────────────────────────────────────────
 

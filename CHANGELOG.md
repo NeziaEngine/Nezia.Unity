@@ -14,7 +14,8 @@
   `parent` 空文字なら Master 直下、そうでなければ同アセット内の別バス配下に紐付く。
   - `Resolve(string busName)` — 親→子の順で `NeziaBus` を lazy 構築・キャッシュ
   - `Build()` — 全バスを一括実体化（idempotent）
-  - `Validate()` — ネイティブを触らずに重複名 / 未知 parent / 循環を検出
+  - `Validate()`（Editor 専用）— ネイティブを触らずに重複名 / 未知 parent /
+    循環を検出。`OnValidate` から自動で呼ばれ Console に warning として出る
 - `NeziaAudioSource.mixerAsset` / `outputBusName` — `NeziaMixerAsset` 内のバスを
   名前で指定。`Start()` での解決順は **MixerAsset 優先 → BusMap fallback**
   （既存ユーザーは無影響）

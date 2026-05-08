@@ -75,6 +75,7 @@ namespace Nezia.Unity.Tests
 
         // ─── NeziaMixerAsset (IP-1 PR-A) ───────────────────────────
 
+#if UNITY_EDITOR
         [Test]
         public void MixerAsset_EmptyValidates()
         {
@@ -126,6 +127,7 @@ namespace Nezia.Unity.Tests
             }
             finally { ScriptableObject.DestroyImmediate(asset); }
         }
+#endif
 
         [Test]
         public void MixerAsset_ResolveEmptyName_ReturnsInvalid()
