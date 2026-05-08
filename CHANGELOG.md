@@ -21,6 +21,16 @@
   （既存ユーザーは無影響）
 - `Nezia/Mixer Asset` メニューから生成可
 
+- `NeziaMixerAsset.BusNode.effects`（IP-1 PR-B）— バス毎にエフェクトチェーンを
+  Inspector で宣言可能に。`[SerializeReference]` ベースの多態シリアライズで
+  `LowPass` / `HighPass` / `Reverb` / `Compressor` を kind 別に持つ。
+  - 各 spec は `position` (Pre/Post) と `enabled` 初期値、kind 固有のパラメータ
+    （例: `LowPass { cutoff, q }`、`Reverb { roomSize, damping, wet, dry, width }`）を持つ
+  - `Resolve(busName)` で対応バスを実体化した直後にエフェクトを宣言順で挿入し、
+    初期パラメータを反映する
+  - `ResolveEffects(busName)` / `ResolveEffect(busName, index)` で実体化後の
+    `NeziaEffect` ハンドルを取得（ランタイムでのパラメータ調整用）
+
 - `NeziaEffect` に kind 別の type-safe ラッパを追加（IP-2）:
   - `effect.AsLowPass()` → `NeziaLowPassEffect` (`Cutoff`, `Q`)
   - `effect.AsHighPass()` → `NeziaHighPassEffect` (`Cutoff`, `Q`)
