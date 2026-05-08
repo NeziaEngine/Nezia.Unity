@@ -141,6 +141,50 @@ namespace Nezia.Unity.Tests
             finally { ScriptableObject.DestroyImmediate(asset); }
         }
 
+        [Test]
+        public void MixerAsset_ResolveEffects_EmptyOnUnknownBus()
+        {
+            var asset = ScriptableObject.CreateInstance<NeziaMixerAsset>();
+            try
+            {
+                Assert.IsEmpty(asset.ResolveEffects("Nope"));
+                Assert.IsFalse(asset.ResolveEffect("Nope", 0).IsValid);
+            }
+            finally { ScriptableObject.DestroyImmediate(asset); }
+        }
+
+        // ─── BusEffect specs (IP-1 PR-B) ───────────────────────────
+
+        [Test]
+        public void BusEffect_LowPass_KindMatches()
+        {
+            var spec = new NeziaMixerAsset.LowPass { cutoff = 800f, q = 1.2f };
+            Assert.AreEqual(NeziaEffectKind.LowPass, spec.Kind);
+            Assert.IsTrue(spec.enabled);
+            Assert.AreEqual(NeziaEffectPosition.Post, spec.position);
+        }
+
+        [Test]
+        public void BusEffect_HighPass_KindMatches()
+        {
+            var spec = new NeziaMixerAsset.HighPass();
+            Assert.AreEqual(NeziaEffectKind.HighPass, spec.Kind);
+        }
+
+        [Test]
+        public void BusEffect_Reverb_KindMatches()
+        {
+            var spec = new NeziaMixerAsset.Reverb();
+            Assert.AreEqual(NeziaEffectKind.Reverb, spec.Kind);
+        }
+
+        [Test]
+        public void BusEffect_Compressor_KindMatches()
+        {
+            var spec = new NeziaMixerAsset.Compressor();
+            Assert.AreEqual(NeziaEffectKind.Compressor, spec.Kind);
+        }
+
         private static NeziaMixerAsset MakeMixer((string name, string parent)[] entries)
         {
             var asset = ScriptableObject.CreateInstance<NeziaMixerAsset>();

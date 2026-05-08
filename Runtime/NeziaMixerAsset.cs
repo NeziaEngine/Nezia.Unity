@@ -5,13 +5,18 @@ using UnityEngine;
 namespace Nezia.Unity
 {
     /// <summary>
-    /// バスツリーを Inspector で設計するための ScriptableObject（IP-1 PR-A スコープ）。
+    /// バスツリーを Inspector で設計するための ScriptableObject（IP-1 PR-A / PR-B スコープ）。
     ///
     /// <para>
     /// Master 直下のバス階層を <see cref="BusNode"/> の flat list として保持する。
     /// <see cref="BusNode.parent"/> が空文字なら master 直下、そうでなければ同アセット内の
     /// 別 <see cref="BusNode.name"/> 配下に紐付く。<see cref="Resolve"/> 初回呼び出し時に
     /// 親→子の順で <see cref="NeziaBus"/> を lazy 構築し、内部 Dictionary にキャッシュする。
+    /// </para>
+    ///
+    /// <para>
+    /// PR-B からは各 <see cref="BusNode"/> に <see cref="BusEffect"/> を宣言でき、
+    /// バス実体化と同じタイミングでエフェクトチェーンを構築する（<see cref="ResolveEffects"/>）。
     /// </para>
     ///
     /// <para>
@@ -39,6 +44,100 @@ namespace Nezia.Unity
 
             [Tooltip("ミュート初期値。")]
             public bool muted;
+
+            [SerializeReference, Tooltip("このバスに挿入するエフェクトチェーン。宣言順に追加される。")]
+            public List<BusEffect> effects = new();
+        }
+
+        /// <summary>
+        /// バスに挿入するエフェクトの宣言ベース型。<see cref="LowPass"/> / <see cref="HighPass"/> /
+        /// <see cref="Reverb"/> / <see cref="Compressor"/> を <c>[SerializeReference]</c> で
+        /// 多態シリアライズする。
+        /// </summary>
+        [Serializable]
+        public abstract class BusEffect
+        {
+            [Tooltip("Pre = フェーダー前 / Post = フェーダー後。")]
+            public NeziaEffectPosition position = NeziaEffectPosition.Post;
+
+            [Tooltip("初期 enabled。false で挿入後に即 disable する。")]
+            public bool enabled = true;
+
+            public abstract NeziaEffectKind Kind { get; }
+
+            internal abstract void ApplyInitial(NeziaEffect effect);
+        }
+
+        [Serializable]
+        public sealed class LowPass : BusEffect
+        {
+            [Range(20f, 20000f)] public float cutoff = 1000f;
+            [Range(0.1f, 10f)] public float q = 0.7071f;
+            public override NeziaEffectKind Kind => NeziaEffectKind.LowPass;
+            internal override void ApplyInitial(NeziaEffect effect)
+            {
+                var v = effect.AsLowPass();
+                v.Cutoff = cutoff;
+                v.Q = q;
+            }
+        }
+
+        [Serializable]
+        public sealed class HighPass : BusEffect
+        {
+            [Range(20f, 20000f)] public float cutoff = 200f;
+            [Range(0.1f, 10f)] public float q = 0.7071f;
+            public override NeziaEffectKind Kind => NeziaEffectKind.HighPass;
+            internal override void ApplyInitial(NeziaEffect effect)
+            {
+                var v = effect.AsHighPass();
+                v.Cutoff = cutoff;
+                v.Q = q;
+            }
+        }
+
+        [Serializable]
+        public sealed class Reverb : BusEffect
+        {
+            [Range(0f, 1f)] public float roomSize = 0.5f;
+            [Range(0f, 1f)] public float damping = 0.5f;
+            [Range(0f, 1f)] public float wet = 0.33f;
+            [Range(0f, 1f)] public float dry = 0.7f;
+            [Range(0f, 1f)] public float width = 1f;
+            public override NeziaEffectKind Kind => NeziaEffectKind.Reverb;
+            internal override void ApplyInitial(NeziaEffect effect)
+            {
+                var v = effect.AsReverb();
+                v.RoomSize = roomSize;
+                v.Damping = damping;
+                v.Wet = wet;
+                v.Dry = dry;
+                v.Width = width;
+            }
+        }
+
+        [Serializable]
+        public sealed class Compressor : BusEffect
+        {
+            [Tooltip("圧縮開始 dB (例: -20.0)")]
+            public float thresholdDb = -20f;
+            [Tooltip("圧縮比。1.0 で無効、∞ で limiter。")]
+            public float ratio = 4f;
+            public float attackMs = 10f;
+            public float releaseMs = 100f;
+            public float kneeDb = 6f;
+            public float makeupDb = 0f;
+            public override NeziaEffectKind Kind => NeziaEffectKind.Compressor;
+            internal override void ApplyInitial(NeziaEffect effect)
+            {
+                var v = effect.AsCompressor();
+                v.ThresholdDb = thresholdDb;
+                v.Ratio = ratio;
+                v.AttackMs = attackMs;
+                v.ReleaseMs = releaseMs;
+                v.KneeDb = kneeDb;
+                v.MakeupDb = makeupDb;
+            }
         }
 
         [SerializeField] private List<BusNode> buses = new();
@@ -47,6 +146,7 @@ namespace Nezia.Unity
 
         // 解決済みバス。Generation をまたいで使い回さない（Editor 用）。
         private readonly Dictionary<string, NeziaBus> _resolved = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, NeziaEffect[]> _resolvedEffects = new(StringComparer.Ordinal);
 #if UNITY_EDITOR
         private int _resolvedGeneration;
 #endif
@@ -82,6 +182,29 @@ namespace Nezia.Unity
             return _byName.ContainsKey(busName)
                 ? ResolveInternal(busName, new HashSet<string>(StringComparer.Ordinal))
                 : NeziaBus.Invalid;
+        }
+
+        /// <summary>
+        /// 指定バスに紐付く（解決済み）エフェクトハンドルを宣言順に返す。
+        /// バス自体が未解決なら lazy 解決を行い、その時点で <see cref="BusEffect"/> を全て挿入する。
+        /// </summary>
+        public IReadOnlyList<NeziaEffect> ResolveEffects(string busName)
+        {
+            if (string.IsNullOrEmpty(busName)) return Array.Empty<NeziaEffect>();
+            EnsureFresh();
+            BuildLookup();
+            if (!_byName.ContainsKey(busName)) return Array.Empty<NeziaEffect>();
+            ResolveInternal(busName, new HashSet<string>(StringComparer.Ordinal));
+            return _resolvedEffects.TryGetValue(busName, out var arr) ? arr : Array.Empty<NeziaEffect>();
+        }
+
+        /// <summary>
+        /// 指定バスの index 番目のエフェクトを返す。範囲外なら <see cref="NeziaEffect.Invalid"/>。
+        /// </summary>
+        public NeziaEffect ResolveEffect(string busName, int index)
+        {
+            var list = ResolveEffects(busName);
+            return (uint)index < (uint)list.Count ? list[index] : NeziaEffect.Invalid;
         }
 
 #if UNITY_EDITOR
@@ -145,10 +268,12 @@ namespace Nezia.Unity
             if (_resolved.Count > 0 && _resolvedGeneration != NeziaEngine.Generation)
             {
                 _resolved.Clear();
+                _resolvedEffects.Clear();
                 _resolvedGeneration = NeziaEngine.Generation;
             }
             else if (_resolved.Count == 0)
             {
+                _resolvedEffects.Clear();
                 _resolvedGeneration = NeziaEngine.Generation;
             }
 #endif
@@ -190,6 +315,23 @@ namespace Nezia.Unity
             if (node.muted) bus.Muted = true;
 
             _resolved[busName] = bus;
+
+            // エフェクトチェーンを宣言順に挿入する。
+            if (node.effects != null && node.effects.Count > 0)
+            {
+                var fxArr = new NeziaEffect[node.effects.Count];
+                for (int i = 0; i < node.effects.Count; i++)
+                {
+                    var spec = node.effects[i];
+                    if (spec == null) { fxArr[i] = NeziaEffect.Invalid; continue; }
+                    var fx = bus.AddEffect(spec.Kind, spec.position);
+                    spec.ApplyInitial(fx);
+                    if (!spec.enabled) fx.Enabled = false;
+                    fxArr[i] = fx;
+                }
+                _resolvedEffects[busName] = fxArr;
+            }
+
             visiting.Remove(busName);
             return bus;
         }
@@ -197,6 +339,7 @@ namespace Nezia.Unity
         private void OnDisable()
         {
             _resolved.Clear();
+            _resolvedEffects.Clear();
             _byName = null;
         }
     }
