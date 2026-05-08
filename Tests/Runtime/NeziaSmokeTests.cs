@@ -1,5 +1,6 @@
 using System;
 using NUnit.Framework;
+using UnityEngine;
 using Nezia.Native;
 using Nezia.Unity;
 
@@ -70,6 +71,87 @@ namespace Nezia.Unity.Tests
         private static NeziaEffect MakeFakeEffect(NeziaEffectKind kind)
         {
             return new NeziaEffect(new NeziaEntityId { index = uint.MaxValue, generation = 0 }, kind);
+        }
+
+        // ─── NeziaMixerAsset (IP-1 PR-A) ───────────────────────────
+
+#if UNITY_EDITOR
+        [Test]
+        public void MixerAsset_EmptyValidates()
+        {
+            var asset = ScriptableObject.CreateInstance<NeziaMixerAsset>();
+            try
+            {
+                Assert.IsEmpty(asset.Validate());
+                Assert.IsEmpty(asset.Buses);
+            }
+            finally { ScriptableObject.DestroyImmediate(asset); }
+        }
+
+        [Test]
+        public void MixerAsset_DuplicateNames_AreReported()
+        {
+            var asset = MakeMixer(new[]
+            {
+                ("Master", ""),
+                ("Master", ""),
+            });
+            try
+            {
+                var errs = asset.Validate();
+                Assert.IsTrue(errs.Exists(e => e.Contains("重複")));
+            }
+            finally { ScriptableObject.DestroyImmediate(asset); }
+        }
+
+        [Test]
+        public void MixerAsset_UnknownParent_IsReported()
+        {
+            var asset = MakeMixer(new[] { ("BGM", "Nope") });
+            try
+            {
+                var errs = asset.Validate();
+                Assert.IsTrue(errs.Exists(e => e.Contains("見つかりません")));
+            }
+            finally { ScriptableObject.DestroyImmediate(asset); }
+        }
+
+        [Test]
+        public void MixerAsset_Cycle_IsReported()
+        {
+            var asset = MakeMixer(new[] { ("A", "B"), ("B", "A") });
+            try
+            {
+                var errs = asset.Validate();
+                Assert.IsTrue(errs.Exists(e => e.Contains("循環")));
+            }
+            finally { ScriptableObject.DestroyImmediate(asset); }
+        }
+#endif
+
+        [Test]
+        public void MixerAsset_ResolveEmptyName_ReturnsInvalid()
+        {
+            var asset = ScriptableObject.CreateInstance<NeziaMixerAsset>();
+            try
+            {
+                Assert.IsFalse(asset.Resolve(null).IsValid);
+                Assert.IsFalse(asset.Resolve("").IsValid);
+            }
+            finally { ScriptableObject.DestroyImmediate(asset); }
+        }
+
+        private static NeziaMixerAsset MakeMixer((string name, string parent)[] entries)
+        {
+            var asset = ScriptableObject.CreateInstance<NeziaMixerAsset>();
+            // private List<BusNode> へは Reflection でセット（Inspector を介さずに組み立てる）。
+            var field = typeof(NeziaMixerAsset).GetField("buses",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            var list = new System.Collections.Generic.List<NeziaMixerAsset.BusNode>();
+            foreach (var (n, p) in entries)
+                list.Add(new NeziaMixerAsset.BusNode { name = n, parent = p, gain = 1f });
+            field.SetValue(asset, list);
+            return asset;
         }
     }
 }

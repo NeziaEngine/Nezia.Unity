@@ -44,6 +44,8 @@ namespace Nezia.Unity
         [SerializeField, Range(0, 255)] private int _priority = 128;
         [SerializeField] private AudioMixerGroup _outputAudioMixerGroup;
         [SerializeField] private NeziaBusMap _busMap;
+        [SerializeField] private NeziaMixerAsset _mixerAsset;
+        [SerializeField] private string _outputBusName;
 
         // ─── ランタイム状態 ──────────────────────────────────────
 
@@ -257,6 +259,31 @@ namespace Nezia.Unity
         }
 
         /// <summary>
+        /// バスツリー設計用 ScriptableObject（IP-1）。設定されている場合は <see cref="outputBusName"/>
+        /// で指定されたバスを優先し、未設定なら <see cref="busMap"/> 経路にフォールバックする。
+        /// </summary>
+        public NeziaMixerAsset mixerAsset
+        {
+            get => _mixerAsset;
+            set { _mixerAsset = value; ResolveOutputBusFromAsset(); }
+        }
+
+        /// <summary>
+        /// <see cref="mixerAsset"/> 内で参照するバスの論理名。空文字なら master 直下扱い。
+        /// </summary>
+        public string outputBusName
+        {
+            get => _outputBusName;
+            set { _outputBusName = value; ResolveOutputBusFromAsset(); }
+        }
+
+        private void ResolveOutputBusFromAsset()
+        {
+            if (_mixerAsset != null && !string.IsNullOrEmpty(_outputBusName))
+                outputBus = _mixerAsset.Resolve(_outputBusName);
+        }
+
+        /// <summary>
         /// 現在再生中か。<c>AudioSource.isPlaying</c> 互換。
         ///
         /// <para>
@@ -462,7 +489,9 @@ namespace Nezia.Unity
 
         private void Start()
         {
-            // 起動時に AudioMixerGroup → Bus を解決（busMap が後から差された場合の救済）
+            // MixerAsset 優先、未設定 / 未解決なら BusMap に fallback。
+            if (!outputBus.IsValid && _mixerAsset != null && !string.IsNullOrEmpty(_outputBusName))
+                outputBus = _mixerAsset.Resolve(_outputBusName);
             if (_busMap != null && _outputAudioMixerGroup != null && !outputBus.IsValid)
                 outputBus = _busMap.Resolve(_outputAudioMixerGroup);
 
