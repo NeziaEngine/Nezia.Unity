@@ -253,9 +253,9 @@ EditorWindow で IP-1 のアセットや実行中の状態を可視化。
 
 | 項目 | 状態 | 担当 PR |
 |---|---|---|
-| IP-1 Mixer Asset | PR-A 完了（バスツリー）/ PR-B 完了（バスごとのエフェクト挿入）/ PR-C 実装中（Send 配線・sidechain） | #26 (PR-A), #27 (PR-B) |
+| IP-1 Mixer Asset | PR-A 完了（バスツリー）/ PR-B 完了（バスごとのエフェクト挿入）/ PR-C 完了（Send 配線・sidechain） | #26 (PR-A), #27 (PR-B), #29 (PR-C) |
 | IP-2 Effect type-safe | 完了 | #25 |
-| IP-3 Snapshot Asset | 未着手 | — |
+| IP-3 Snapshot Asset | PR-A 実装中（Phase 1: バスゲイン / ミュート） | — |
 | IP-4 Asset Preview | 未着手 | — |
 | IP-5 Source Effect Slot | 未着手 | — |
 | IP-6 PlayScheduled | 調査前 | — |

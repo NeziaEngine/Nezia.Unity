@@ -317,6 +317,125 @@ namespace Nezia.Unity.Tests
         }
 #endif
 
+        // ─── NeziaSnapshotAsset (IP-3 PR-A) ────────────────────────
+
+        [Test]
+        public void SnapshotAsset_BusOverride_Defaults()
+        {
+            var ov = new NeziaSnapshotAsset.BusOverride();
+            Assert.IsTrue(ov.overrideGain);
+            Assert.IsFalse(ov.overrideMuted);
+            Assert.AreEqual(1f, ov.gain);
+            Assert.IsFalse(ov.muted);
+        }
+
+        [Test]
+        public void SnapshotAsset_ApplyWithoutMixer_Throws()
+        {
+            var snap = ScriptableObject.CreateInstance<NeziaSnapshotAsset>();
+            try
+            {
+                Assert.Throws<InvalidOperationException>(() => snap.Apply());
+            }
+            finally { ScriptableObject.DestroyImmediate(snap); }
+        }
+
+#if UNITY_EDITOR
+        [Test]
+        public void SnapshotAsset_NoMixer_ReportsError()
+        {
+            var snap = ScriptableObject.CreateInstance<NeziaSnapshotAsset>();
+            try
+            {
+                var errs = snap.Validate();
+                Assert.IsTrue(errs.Exists(e => e.Contains("mixer")));
+            }
+            finally { ScriptableObject.DestroyImmediate(snap); }
+        }
+
+        [Test]
+        public void SnapshotAsset_UnknownBus_IsReported()
+        {
+            var mixer = MakeMixer(new[] { ("BGM", ""), ("SFX", "") });
+            var snap = ScriptableObject.CreateInstance<NeziaSnapshotAsset>();
+            SetMixer(snap, mixer);
+            SetBusOverrides(snap, new[]
+            {
+                new NeziaSnapshotAsset.BusOverride { busName = "Nope", overrideGain = true, gain = 0.5f },
+            });
+            try
+            {
+                var errs = snap.Validate();
+                Assert.IsTrue(errs.Exists(e => e.Contains("'Nope'")));
+            }
+            finally
+            {
+                ScriptableObject.DestroyImmediate(snap);
+                ScriptableObject.DestroyImmediate(mixer);
+            }
+        }
+
+        [Test]
+        public void SnapshotAsset_DuplicateBusName_IsReported()
+        {
+            var mixer = MakeMixer(new[] { ("BGM", "") });
+            var snap = ScriptableObject.CreateInstance<NeziaSnapshotAsset>();
+            SetMixer(snap, mixer);
+            SetBusOverrides(snap, new[]
+            {
+                new NeziaSnapshotAsset.BusOverride { busName = "BGM", overrideGain = true, gain = 0.5f },
+                new NeziaSnapshotAsset.BusOverride { busName = "BGM", overrideMuted = true, muted = true },
+            });
+            try
+            {
+                var errs = snap.Validate();
+                Assert.IsTrue(errs.Exists(e => e.Contains("重複")));
+            }
+            finally
+            {
+                ScriptableObject.DestroyImmediate(snap);
+                ScriptableObject.DestroyImmediate(mixer);
+            }
+        }
+
+        [Test]
+        public void SnapshotAsset_Valid_ProducesNoErrors()
+        {
+            var mixer = MakeMixer(new[] { ("BGM", ""), ("SFX", "") });
+            var snap = ScriptableObject.CreateInstance<NeziaSnapshotAsset>();
+            SetMixer(snap, mixer);
+            SetBusOverrides(snap, new[]
+            {
+                new NeziaSnapshotAsset.BusOverride { busName = "BGM", overrideGain = true, gain = 0.7f },
+                new NeziaSnapshotAsset.BusOverride { busName = "SFX", overrideMuted = true, muted = true },
+            });
+            try
+            {
+                Assert.IsEmpty(snap.Validate());
+                Assert.AreEqual(2, snap.BusOverrides.Count);
+            }
+            finally
+            {
+                ScriptableObject.DestroyImmediate(snap);
+                ScriptableObject.DestroyImmediate(mixer);
+            }
+        }
+
+        private static void SetMixer(NeziaSnapshotAsset snap, NeziaMixerAsset mixer)
+        {
+            var field = typeof(NeziaSnapshotAsset).GetField("mixer",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            field.SetValue(snap, mixer);
+        }
+
+        private static void SetBusOverrides(NeziaSnapshotAsset snap, NeziaSnapshotAsset.BusOverride[] entries)
+        {
+            var field = typeof(NeziaSnapshotAsset).GetField("busOverrides",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            field.SetValue(snap, new System.Collections.Generic.List<NeziaSnapshotAsset.BusOverride>(entries));
+        }
+#endif
+
         private static NeziaMixerAsset MakeMixer((string name, string parent)[] entries)
         {
             var asset = ScriptableObject.CreateInstance<NeziaMixerAsset>();
