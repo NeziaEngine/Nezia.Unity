@@ -9,6 +9,11 @@
 
 ### Added
 
+- **IP-12 PR-E ドキュメント整備** — `NeziaMixerInspector` (Buses / Effects /
+  Sends タブ) の使い方・Compressor sidechain (ducking) の組み立て手順・
+  バリデーション・Undo / Redo の挙動を [`docs~/mixer-authoring.md`](docs~/mixer-authoring.md)
+  にまとめた。README の Quickstart からも導線を張った。
+
 - **IP-12 PR-D Send / sidechain タブ** — `NeziaMixerInspector` 上部に
   `Buses` / `Sends` のタブストリップを追加し、Send 配線を専用 UI で編集できる
   ようにした。
