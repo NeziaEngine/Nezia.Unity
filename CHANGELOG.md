@@ -9,6 +9,50 @@
 
 ### Added
 
+- **IP-4 Clip-centric authoring**（PR-A〜C2）— 「鳴り方は Clip が決め、
+  Source は『いつ・どこで』だけ」という Wwise / FMOD 流の authoring モデルへ
+  転換。詳細は [`docs~/migration/clip-centric.md`](docs~/migration/clip-centric.md)。
+  - `NeziaSoundAsset` 基底（IP-4 PR-A、#33）に音響デフォルト 12 フィールドを追加:
+    `Volume` / `Pitch` / `Loop` / `OutputMixerAsset`+`OutputBusName` /
+    `SpatialBlend` / `MinDistance` / `MaxDistance` / `RolloffMode` /
+    `AttenuationCurve` / `DopplerLevel` / `Priority`
+  - `NeziaSoundAsset.SourceEffect` 宣言（`LowPass` / `HighPass` / `Reverb` /
+    `Compressor`、`[SerializeReference]` 多態シリアライズ）— Clip 起点の
+    エフェクトチェーンを Inspector で定義可
+  - `NeziaSoundAsset.SourceSend` 宣言 — Clip 起点の Aux Send（Bus / Compressor
+    sidechain）。Wwise の per-event aux send 互換で、同じ Reverb Bus を
+    共有しつつ音ごとに reverb 量を独立に持たせられる。
+    新規 core FFI `nezia_send_add_source_to_bus` /
+    `nezia_send_add_source_to_compressor` を経由
+  - `NeziaSoundAsset.ApplyAcousticsTo` / `ApplyEffectsAndSendsTo` /
+    `ApplyDefaultsTo` / `ResolveOutputBus` — Spawn 直後の source に音響設定を
+    一括適用するヘルパ。effect / send は core 側の自動 cleanup 規約に乗るため
+    解放管理不要
+  - `NeziaSend.AddSourceToBus` / `AddSourceToCompressor`（internal wrapper）—
+    新規 core FFI への薄いブリッジ
+  - `NeziaAudioSource.useClipDefaults`（IP-4 PR-A、既定 `false` で後方互換）—
+    `true` のとき音響設定を Clip に委譲する master toggle
+  - `NeziaAudioSource` の per-property override flag 群（IP-4 PR-B、#35）:
+    `_overrideOutputBus` / `_overrideSpatial` / `_overrideAttenuation` /
+    `_overrideDoppler` / `_overridePriority` / `_overrideLoop`。
+    `useClipDefaults=true` のときに「Clip 値を使う / Source 値で override する」
+    を per-property に決める
+  - 各プロパティ setter の auto-flip — `source.spatialBlend = 1f` 等の代入で
+    対応する override flag が暗黙に true になる。既存スクリプトが Clip-centric
+    モードでも違和感なく動く
+  - `NeziaAudioSource.Play()` の二系統分岐 — `useClipDefaults=true` 時は
+    per-property に Source / Clip 値を選択して `ApplyAcousticsTo` に渡し、
+    `ApplyEffectsAndSendsTo` で Clip 起点 effect / send を実体化する
+  - **Custom Inspector** `NeziaAudioSourceEditor`（IP-4 PR-C1、#36）—
+    override-aware UI。各 overridable パラメータに override トグル + 未 override
+    時の `Clip default: ...` 補助ラベル。volume / pitch は scale 合成後の最終値
+    （例: `× Clip 0.8 = 0.4`）をインライン表示
+  - **マイグレーションコマンド**（IP-4 PR-C2、#37）:
+    - `Tools/Nezia/Convert Selection to Clip-centric Mode` — 選択 Source の
+      `useClipDefaults` を flip し、Source 値が Clip 値と異なる項目だけ
+      override ON で残す
+    - `Tools/Nezia/Revert Selection to Legacy Mode` — 互換モードへ戻す逆方向
+
 - `NeziaMixerAsset`（`ScriptableObject`、IP-1 PR-A）— バスツリーを Inspector で
   設計するための flat list。`BusNode { name, parent, gain, muted }` を持ち、
   `parent` 空文字なら Master 直下、そうでなければ同アセット内の別バス配下に紐付く。

@@ -372,7 +372,7 @@ EditorWindow で IP-1 のアセットや実行中の状態を可視化。
 | IP-1 Mixer Asset | 完了 | #26 (PR-A), #27 (PR-B), #29 (PR-C) |
 | IP-2 Effect type-safe | 完了 | #25 |
 | IP-3 Snapshot Asset | 完了 | #31 (PR-A), #32 (PR-B) |
-| **IP-4 Clip-centric 再設計** | **PR-A / PR-B / PR-C1 完了 / PR-C2 進行中** | #33 (PR-A), #35 (PR-B), #36 (PR-C1), 進行中 (PR-C2) |
+| **IP-4 Clip-centric 再設計** | **PR-A〜C2 完了 / PR-D 進行中** | #33 (PR-A), #35 (PR-B), #36 (PR-C1), #37 (PR-C2), 進行中 (PR-D) |
 | IP-5 Source Effect Slot | IP-4 待ち | — |
 | IP-6 Asset Preview | デーモン依存により保留（バイナリ直接操作の実装路線は廃止） | — |
 | IP-7 PlayScheduled | 調査前 | — |
