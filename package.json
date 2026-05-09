@@ -3,12 +3,10 @@
   "version": "0.1.0",
   "displayName": "Nezia Sound Engine",
   "description": "Nezia Sound Engine。",
-  "unity": "6000.2",
+  "unity": "2022.3",
   "author": {
     "name": "Nezia",
     "email": "kaido_atsuya@atsuatsu.dev"
   },
-  "dependencies": {
-    "com.unity.graphtoolkit": "0.4.0-exp.2"
-  }
+  "dependencies": {}
 }

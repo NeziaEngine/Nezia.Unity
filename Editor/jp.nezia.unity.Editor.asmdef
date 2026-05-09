@@ -2,8 +2,7 @@
   "name": "jp.nezia.unity.Editor",
   "rootNamespace": "Nezia.Unity.Editor",
   "references": [
-    "jp.nezia.unity.Runtime",
-    "Unity.GraphToolkit.Editor"
+    "jp.nezia.unity.Runtime"
   ],
   "includePlatforms": [
     "Editor"
