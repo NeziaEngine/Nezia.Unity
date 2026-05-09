@@ -9,6 +9,17 @@
 
 ### Added
 
+- **IP-12 PR-A `NeziaMixerWindow` スキャフォールド** — `Tools > Nezia >
+  Mixer Editor` で開く専用 EditorWindow を追加（表示のみ・編集は PR-B）。
+  - UI Toolkit `TreeView` でバスツリーを階層表示。仮想 `Master` ルートを
+    最上位に置き、`parent` が空 / 未知のバスを直下に並べる
+  - 上部 `ObjectField` で編集対象 `NeziaMixerAsset` を切替。アセット未指定時は
+    `NeziaSettings.Instance.DefaultMixer` を自動ロード
+  - 各行に `gain` / `muted` を補助表示
+  - 公開 API: `NeziaMixerWindow.Open()` / `NeziaMixerWindow.Open(asset)`
+  - GTK ベースのノードグラフ案 (旧 IP-12 PR-1+2) は撤回し、Wwise / FMOD /
+    Unity Audio Mixer と同じ `TreeView + UI Toolkit ListView` ハイブリッドに転換
+
 - **IP-12 PR-0a `NeziaSettings` 導入** — URP の `GraphicsSettings` 方式に倣い、
   プロジェクト全体の Nezia 既定設定を `Project Settings > Nezia` から
   アセット参照 1 本で管理できるようにした。
