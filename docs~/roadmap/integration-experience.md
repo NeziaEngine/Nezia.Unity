@@ -253,7 +253,7 @@ EditorWindow で IP-1 のアセットや実行中の状態を可視化。
 
 | 項目 | 状態 | 担当 PR |
 |---|---|---|
-| IP-1 Mixer Asset | PR-A 完了（バスツリー）/ PR-B 実装中（バスごとのエフェクト挿入）/ PR-C 未着手（Send 配線・sidechain） | #26 (PR-A) |
+| IP-1 Mixer Asset | PR-A 完了（バスツリー）/ PR-B 完了（バスごとのエフェクト挿入）/ PR-C 実装中（Send 配線・sidechain） | #26 (PR-A), #27 (PR-B) |
 | IP-2 Effect type-safe | 完了 | #25 |
 | IP-3 Snapshot Asset | 未着手 | — |
 | IP-4 Asset Preview | 未着手 | — |
