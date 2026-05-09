@@ -49,15 +49,33 @@ namespace Nezia.Unity
 
         // IP-4 (Clip-centric authoring): true のとき音響設定を sound asset 側に委譲する。
         // - volume / pitch は Clip 値への乗算 (scale) として動く
-        // - loop は Source または Clip のいずれかが true なら有効
-        // - outputBus は Source 側未設定なら Clip の `OutputMixerAsset`/`OutputBusName` を解決
-        // - spatial / attenuation / doppler / priority は Clip の `ApplyDefaultsTo` が一括適用
+        // - loop / outputBus / spatial / attenuation / doppler / priority は per-property の
+        //   `_overrideXxx` フラグで Clip 値か Source 値かを選択する
         // 既存プレハブでの破壊的変更を避けるため既定は false。新規 NeziaAudioSource では
         // 推奨値 true。マイグレーションコマンドは PR-C で提供予定。
         [SerializeField,
          Tooltip("ON: 音響設定を Clip (NeziaSoundAsset) に委譲し、Source.volume/pitch は scale として効く。" +
                  "OFF (互換モード): Source 側の値が直接最終値になる従来挙動。")]
         private bool _useClipDefaults;
+
+        // ─── Per-property override（IP-4 PR-B） ──────────────────
+        //
+        // useClipDefaults=true のとき Source プロパティを Clip 値の上から override するか決めるフラグ群。
+        // 既定はすべて false = Clip 値を採用。Source の対応 setter (e.g. `source.spatialBlend = 1f`) を
+        // 呼ぶと暗黙に true に切り替わるため、従来のスクリプト記述で違和感なく override できる。
+        // useClipDefaults=false (legacy) のときは互換挙動が支配するためフラグは無視される。
+        [SerializeField, Tooltip("Source.outputBus を Clip より優先する。")]
+        private bool _overrideOutputBus;
+        [SerializeField, Tooltip("Source の spatialBlend / 距離 / rolloff を Clip より優先する。")]
+        private bool _overrideSpatial;
+        [SerializeField, Tooltip("Source.attenuationCurve を Clip より優先する。")]
+        private bool _overrideAttenuation;
+        [SerializeField, Tooltip("Source.dopplerLevel を Clip より優先する。")]
+        private bool _overrideDoppler;
+        [SerializeField, Tooltip("Source.priority を Clip より優先する。")]
+        private bool _overridePriority;
+        [SerializeField, Tooltip("Source.loop を Clip より優先する。")]
+        private bool _overrideLoop;
 
         // ─── ランタイム状態 ──────────────────────────────────────
 
@@ -84,7 +102,7 @@ namespace Nezia.Unity
         public NeziaAttenuationCurveAsset attenuationCurve
         {
             get => _attenuationCurve;
-            set => _attenuationCurve = value;
+            set { _attenuationCurve = value; _overrideAttenuation = true; }
         }
 
         // ─── AudioSource 互換 API ────────────────────────────────
@@ -181,6 +199,7 @@ namespace Nezia.Unity
             set
             {
                 _loop = value;
+                _overrideLoop = true;
                 if (HasLiveSource)
                 {
                     var r = LibNezia.nezia_source_set_loop(
@@ -208,16 +227,32 @@ namespace Nezia.Unity
         }
 
         /// <summary>2D/3D ブレンド (0=2D, 1=3D)。<c>AudioSource.spatialBlend</c> 互換。</summary>
-        public float spatialBlend { get => _spatialBlend; set => _spatialBlend = Mathf.Clamp01(value); }
+        public float spatialBlend
+        {
+            get => _spatialBlend;
+            set { _spatialBlend = Mathf.Clamp01(value); _overrideSpatial = true; }
+        }
 
         /// <summary>距離減衰の最小距離。</summary>
-        public float minDistance { get => _minDistance; set => _minDistance = value; }
+        public float minDistance
+        {
+            get => _minDistance;
+            set { _minDistance = value; _overrideSpatial = true; }
+        }
 
         /// <summary>距離減衰の最大距離。</summary>
-        public float maxDistance { get => _maxDistance; set => _maxDistance = value; }
+        public float maxDistance
+        {
+            get => _maxDistance;
+            set { _maxDistance = value; _overrideSpatial = true; }
+        }
 
         /// <summary>距離減衰モデル。</summary>
-        public NeziaRolloffMode rolloffMode { get => _rolloffMode; set => _rolloffMode = value; }
+        public NeziaRolloffMode rolloffMode
+        {
+            get => _rolloffMode;
+            set { _rolloffMode = value; _overrideSpatial = true; }
+        }
 
         /// <summary>
         /// Doppler 効果の強度。<c>AudioSource.dopplerLevel</c> 互換。
@@ -230,6 +265,7 @@ namespace Nezia.Unity
             set
             {
                 _dopplerLevel = Mathf.Clamp(value, 0f, 5f);
+                _overrideDoppler = true;
                 if (HasLiveSource)
                 {
                     var r = LibNezia.nezia_source_set_doppler_level(
@@ -256,6 +292,7 @@ namespace Nezia.Unity
             set
             {
                 _priority = Mathf.Clamp(value, 0, 255);
+                _overridePriority = true;
                 if (HasLiveSource)
                 {
                     var r = LibNezia.nezia_source_set_priority(
@@ -274,8 +311,14 @@ namespace Nezia.Unity
         /// <summary>
         /// 出力先 <see cref="NeziaBus"/>。<c>AudioSource.outputAudioMixerGroup</c> の代替。
         /// 未設定（<see cref="NeziaBus.Invalid"/>）の場合はマスターバスへ送られる。
+        /// 代入時に override flag が立つので、useClipDefaults=true でも Source 側が優先される。
         /// </summary>
-        public NeziaBus outputBus { get; set; } = NeziaBus.Invalid;
+        private NeziaBus _outputBusValue = NeziaBus.Invalid;
+        public NeziaBus outputBus
+        {
+            get => _outputBusValue;
+            set { _outputBusValue = value; _overrideOutputBus = true; }
+        }
 
         /// <summary>
         /// <c>AudioSource.outputAudioMixerGroup</c> 互換。<see cref="NeziaBusMap"/> が
@@ -379,29 +422,33 @@ namespace Nezia.Unity
 
             // ── volume / pitch / loop / bus を Clip-side 既定と合成 ──────────
             //
-            // useClipDefaults=true: Source の volume/pitch は Clip 基準値への scale。
-            //   loop は Source または Clip の論理和（Source.loop=true なら強制ループ可）。
-            //   bus は Source 側設定が優先、未設定なら Clip の outputBus、最後に Master。
+            // useClipDefaults=true: Source の volume/pitch は常に Clip 基準値への scale (override 無し)。
+            //   loop / bus は per-property override flag が true なら Source 値、false なら Clip 値を採用。
             // useClipDefaults=false (legacy): Source の値がそのまま最終値。
             float clipV = _useClipDefaults ? asset.Volume : 1f;
             float clipP = _useClipDefaults ? asset.Pitch : 1f;
-            bool effectiveLoop = _useClipDefaults ? (_loop || asset.Loop) : _loop;
             float effectiveVolume = (_mute ? 0f : _volume) * clipV;
             float effectivePitch = _pitch * clipP;
 
+            bool effectiveLoop;
+            if (!_useClipDefaults) effectiveLoop = _loop;
+            else effectiveLoop = _overrideLoop ? _loop : asset.Loop;
+
             NeziaEntityId busId;
-            if (outputBus.IsValid)
+            if (!_useClipDefaults)
+            {
+                busId = outputBus.IsValid
+                    ? outputBus.Id
+                    : LibNezia.nezia_engine_master_bus(engine);
+            }
+            else if (_overrideOutputBus && outputBus.IsValid)
             {
                 busId = outputBus.Id;
             }
-            else if (_useClipDefaults)
+            else
             {
                 var clipBus = asset.ResolveOutputBus();
                 busId = clipBus.IsValid ? clipBus.Id : LibNezia.nezia_engine_master_bus(engine);
-            }
-            else
-            {
-                busId = LibNezia.nezia_engine_master_bus(engine);
             }
 
             // 自然終了をネイティブから受け取るためのコールバック登録。
@@ -430,10 +477,22 @@ namespace Nezia.Unity
 
             if (_useClipDefaults)
             {
-                // Clip 側に spatial / doppler / priority / attenuation を委譲する。
-                // 戻り値の AttenuationCurve は despawn 時に Destroy する責務をここで引き取る。
-                _liveAttenuationCurve = asset.ApplyDefaultsTo(engine, src);
-                if (asset.SpatialBlend > 0f) PushPosition();
+                // per-property override: Source 値 (override flag true) か Clip 値 (false) を選んで適用。
+                int effPriority = _overridePriority ? _priority : asset.Priority;
+                float effSpatialBlend = _overrideSpatial ? _spatialBlend : asset.SpatialBlend;
+                float effMinDistance = _overrideSpatial ? _minDistance : asset.MinDistance;
+                float effMaxDistance = _overrideSpatial ? _maxDistance : asset.MaxDistance;
+                var effRolloff = _overrideSpatial ? _rolloffMode : asset.RolloffMode;
+                float effDoppler = _overrideDoppler ? _dopplerLevel : asset.DopplerLevel;
+                var effCurve = _overrideAttenuation ? _attenuationCurve : asset.AttenuationCurve;
+
+                _liveAttenuationCurve = NeziaSoundAsset.ApplyAcousticsTo(
+                    engine, src,
+                    effPriority, effSpatialBlend, effMinDistance, effMaxDistance,
+                    effRolloff, effCurve, effDoppler);
+                asset.ApplyEffectsAndSendsTo(engine, src);
+
+                if (effSpatialBlend > 0f) PushPosition();
             }
             else
             {
@@ -579,12 +638,13 @@ namespace Nezia.Unity
         private void LateUpdate()
         {
             if (!_isPlaying || _isPaused) return;
-            // useClipDefaults=true のときは Clip 側 spatial 設定をトリガに使う。
-            // false のときは従来どおり Source 側 _spatialBlend を見る。
-            bool spatial = _useClipDefaults
-                ? (ResolvedSound?.SpatialBlend ?? 0f) > 0f
-                : _spatialBlend > 0f;
-            if (spatial) PushPositionAndVelocity();
+            // useClipDefaults=true: per-property override を尊重して effective spatial を決める。
+            // false (legacy): 従来どおり Source 側 _spatialBlend を見る。
+            float effSpatial;
+            if (!_useClipDefaults) effSpatial = _spatialBlend;
+            else if (_overrideSpatial) effSpatial = _spatialBlend;
+            else effSpatial = ResolvedSound?.SpatialBlend ?? 0f;
+            if (effSpatial > 0f) PushPositionAndVelocity();
         }
 
         private void OnEnable()
