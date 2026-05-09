@@ -11,8 +11,8 @@ namespace Nezia.Unity.Editor.Mixer
     ///
     /// <para>
     /// バスツリーを編集するための「Hierarchy ペイン + プロパティパネル + Send タブ」UX を
-    /// Inspector として提供する。すべて UI Toolkit (`TreeView` / `TwoPaneSplitView` /
-    /// `Slider` / `Toggle` 等) で実装。Project ビューで <c>NeziaMixerAsset</c> を選択すると
+    /// Inspector として提供する。すべて UI Toolkit (`TreeView` / `Slider` / `Toggle` 等) で
+    /// 実装。Project ビューで <c>NeziaMixerAsset</c> を選択すると
     /// 通常の Inspector パネル内にこの編集 UI が出る。<c>Project Settings &gt; Nezia</c> の
     /// inline Inspector / 2 つ目の Inspector を立てた工程内編集 / lock 機能 etc. すべて
     /// 標準 Unity の作法に乗る。
@@ -43,7 +43,6 @@ namespace Nezia.Unity.Editor.Mixer
         private Button _deleteBusButton;
         private Label _inspectorTitle;
         private VisualElement _effectsRoot;
-        private ScrollView _effectsScroll;
         private VisualElement _validationFooter;
 
         private bool _suspendBindCallbacks;
@@ -79,20 +78,37 @@ namespace Nezia.Unity.Editor.Mixer
 
         public override VisualElement CreateInspectorGUI()
         {
+            // レイアウト方針:
+            //   root (column, height 固定 = Inspector ウィンドウ側の縦スクロールを止める)
+            //     ├─ Toolbar          : 自然高さ (flexShrink=0)
+            //     ├─ TreeView ペイン  : 固定高さ
+            //     ├─ Separator        : 1px ライン
+            //     ├─ Inspector ペイン : flexGrow=1 で残りの縦スペースを全部取る ScrollView
+            //     └─ Validation footer: 自然高さ (flexShrink=0)
+            //
+            // root に height を明示する理由:
+            //   Custom Inspector の親 (InspectorElement) は子の自然サイズに合わせて
+            //   伸びる。root を flexGrow にすると Inspector ウィンドウ側 (外側) の
+            //   ScrollView がスクロールしてしまい、「下ペインだけスクロール」にならない。
+            //   ただし固定値だとウィンドウサイズに追随せず、余白や切れが発生する。
+            //   そこで AttachToPanelEvent で panel ルートに購読し、Inspector ウィンドウの
+            //   可視高さへ動的に同期する (BindRootHeightToInspectorWindow を参照)。
+            //
+            // TwoPaneSplitView は採用しない: 絶対配置による flex 連鎖の切断と drag-line
+            // の被りで下ペインが正しく伸びないケースがあり、Inspector では利得が薄い。
             var root = new VisualElement();
             root.style.flexDirection = FlexDirection.Column;
-            // minHeight は付けない: 余分な空白を作るより、コンテンツの自然サイズに合わせる。
-            // 親 (InspectorElement) が高さを持っているケースでは flex 連鎖で広がる。
-            root.style.flexGrow = 1f;
-            root.style.flexShrink = 1f;
+            root.style.flexShrink = 0f;
+            BindRootHeightToInspectorWindow(root);
 
             BuildToolbar(root);
-            BuildBody(root);
+            BuildTreePane(root);
+            BuildPaneSeparator(root);
+            BuildInspectorPane(root);
             BuildValidationFooter(root);
 
-            // BuildBody で _treeView 等は構築済み。即時で初期描画する（delayCall は
-            // Inspector のライフサイクルと相性が悪く、再構築のたびに古い callback が
-            // 残ってバグの温床になる）。
+            // delayCall は Inspector のライフサイクルと相性が悪い (再構築毎に古い
+            // callback が残る) ため、即時で初期描画する。
             RefreshTree();
             UpdateRightPane();
             UpdateValidationFooter();
@@ -101,6 +117,66 @@ namespace Nezia.Unity.Editor.Mixer
         }
 
         // ─── UI 構築 ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Inspector ウィンドウの可視領域に対し、root の <c>style.height</c> を
+        /// 「下チローム (Asset Labels 等) のすぐ上まで」自動追随させる。
+        /// </summary>
+        /// <remarks>
+        /// Custom Inspector の親はコンテンツ自然サイズで配置するため、root が flexGrow
+        /// だけ持っていてもウィンドウ高さを取れない。一方で固定 (panel高さ − 定数) では
+        /// アセットヘッダ・Asset Labels・AssetBundle 行などの実サイズと合わず、外側
+        /// スクロールが出るか余白が残る。
+        ///
+        /// そこで root の panel 上の位置 (<see cref="VisualElement.worldBound"/>) を毎フレーム
+        /// 取り、panel 高さから「root より上のチローム」を差し引いた残りを高さに設定する。
+        /// 下側チローム分は <paramref name="BottomReservePx"/> で別途確保。
+        /// </remarks>
+        private static void BindRootHeightToInspectorWindow(VisualElement root)
+        {
+            // Asset Labels + AssetBundle 行 + Addressables (任意) のおおよその合計。
+            const float BottomReservePx = 90f;
+            const float MinHeightPx = 240f;
+
+            void Sync()
+            {
+                var panelRoot = root.panel?.visualTree;
+                if (panelRoot == null) return;
+                var panelH = panelRoot.resolvedStyle.height;
+                if (panelH <= 0f) return;
+
+                // root の上端 (panel 座標) より上にあるアセットヘッダ等の高さ。
+                var topOffset = root.worldBound.yMin - panelRoot.worldBound.yMin;
+                if (float.IsNaN(topOffset) || topOffset < 0f) topOffset = 0f;
+
+                var available = panelH - topOffset - BottomReservePx;
+                root.style.height = Mathf.Max(MinHeightPx, available);
+            }
+
+            EventCallback<GeometryChangedEvent> onGeo = null;
+            VisualElement boundPanelRoot = null;
+
+            root.RegisterCallback<AttachToPanelEvent>(_ =>
+            {
+                boundPanelRoot = root.panel?.visualTree;
+                if (boundPanelRoot == null) return;
+                onGeo = __ => Sync();
+                boundPanelRoot.RegisterCallback(onGeo);
+                // root 自身の geometry でも再計算 (上のチロームが伸縮した時の追随)。
+                root.RegisterCallback<GeometryChangedEvent>(onGeo);
+                root.schedule.Execute(Sync).StartingIn(0);
+            });
+            root.RegisterCallback<DetachFromPanelEvent>(_ =>
+            {
+                if (boundPanelRoot != null && onGeo != null)
+                {
+                    boundPanelRoot.UnregisterCallback(onGeo);
+                    root.UnregisterCallback(onGeo);
+                }
+                boundPanelRoot = null;
+                onGeo = null;
+            });
+        }
 
         private void BuildToolbar(VisualElement root)
         {
@@ -126,30 +202,12 @@ namespace Nezia.Unity.Editor.Mixer
             root.Add(toolbar);
         }
 
-        private void BuildBody(VisualElement root)
+        private void BuildTreePane(VisualElement root)
         {
-            // 縦割り (上 = TreeView / 下 = Inspector) — Unity Inspector は横幅が狭いので、
-            // 横割りだと右ペインのフィールドが切れて見えない。上下に積む方が読み易い。
-            // 上ペイン (TreeView) は 160px 固定スタートにして、下ペイン (Bus 編集 +
-            // effect chain) に縦スペースを多く割り当てる。スプリッタで自由に変更可能。
-            var split = new TwoPaneSplitView(0, 160f, TwoPaneSplitViewOrientation.Vertical);
-            split.style.flexGrow = 1f;
-            split.style.flexShrink = 1f;
-            root.Add(split);
-
-            // ── 左 (TreeView を VisualElement でラップして split に渡す)──
-            //
-            // TwoPaneSplitView は子要素を絶対位置レイアウトするため、TreeView を直接
-            // 子にすると TreeView が flex 計算されず描画されない。VisualElement で
-            // 包むことで、ラッパーがペイン高さに合わせて広がり、その内側で TreeView が
-            // 正しく flexGrow できる。
-            var leftPane = new VisualElement();
-            leftPane.style.flexGrow = 1f;
-            leftPane.style.flexShrink = 1f;
-            // TwoPaneSplitView の内部 pane container を 100% 占有させる
-            // (デフォルトでは子の natural size になる)。
-            leftPane.style.height = new Length(100f, LengthUnit.Percent);
-            split.Add(leftPane);
+            var pane = new VisualElement();
+            pane.style.height = 180f;
+            pane.style.flexShrink = 0f;
+            root.Add(pane);
 
             _treeView = new TreeView
             {
@@ -162,41 +220,57 @@ namespace Nezia.Unity.Editor.Mixer
             _treeView.style.flexShrink = 1f;
             _treeView.selectionChanged += _ => OnTreeSelectionChanged();
             ConfigureTreeDragAndDrop(_treeView);
-            leftPane.Add(_treeView);
+            pane.Add(_treeView);
+        }
 
-            // ── 下 (選択中 Bus の Inspector)──
-            //
-            // レイアウト方針: バス共通プロパティ (Name / Gain / Muted) は自然高さ、
-            // Effects セクションを flexGrow=1 で残りスペースを全部消費させる。
-            // Effect 行リストだけ ScrollView で内側にスクロールさせる (外側で
-            // ScrollView するとセクション全体が縮んで「下に空き領域」が出る)。
-            var rightPane = new VisualElement();
-            rightPane.style.paddingTop = 6f;
-            rightPane.style.paddingLeft = 10f;
-            rightPane.style.paddingRight = 10f;
-            rightPane.style.paddingBottom = 6f;
-            rightPane.style.flexGrow = 1f;
-            rightPane.style.flexShrink = 1f;
-            rightPane.style.height = new Length(100f, LengthUnit.Percent);
-            split.Add(rightPane);
+        private static void BuildPaneSeparator(VisualElement root)
+        {
+            var sep = new VisualElement();
+            sep.style.height = 1f;
+            sep.style.flexShrink = 0f;
+            sep.style.backgroundColor = new Color(0f, 0f, 0f, 0.3f);
+            sep.style.marginTop = 2f;
+            sep.style.marginBottom = 2f;
+            root.Add(sep);
+        }
+
+        private void BuildInspectorPane(VisualElement root)
+        {
+            // ペイン全体 (Name/Gain/Muted/Effects まで含めて) を ScrollView で包み、
+            // 縦が溢れたらここだけスクロールする。Toolbar / TreeView / Footer は
+            // 外側に残るので、画面に常駐する。
+            var pane = new ScrollView(ScrollViewMode.Vertical);
+            pane.style.flexGrow = 1f;
+            pane.style.flexShrink = 1f;
+            // ScrollView 内部の content は既定で natural size。padding はここに乗せる。
+            var content = pane.contentContainer;
+            content.style.flexGrow = 1f;
+            content.style.paddingTop = 6f;
+            content.style.paddingLeft = 10f;
+            content.style.paddingRight = 10f;
+            content.style.paddingBottom = 6f;
+            root.Add(pane);
 
             _inspectorPlaceholder = new Label("バスを選択するとプロパティを編集できます。");
             _inspectorPlaceholder.style.color = new Color(0.6f, 0.6f, 0.6f);
             _inspectorPlaceholder.style.whiteSpace = WhiteSpace.Normal;
-            rightPane.Add(_inspectorPlaceholder);
+            pane.Add(_inspectorPlaceholder);
 
             _inspectorRoot = new VisualElement();
             _inspectorRoot.style.flexGrow = 1f;
             _inspectorRoot.style.flexShrink = 1f;
-            rightPane.Add(_inspectorRoot);
+            _inspectorRoot.style.flexDirection = FlexDirection.Column;
+            pane.Add(_inspectorRoot);
 
             _inspectorTitle = new Label("Bus");
             _inspectorTitle.style.unityFontStyleAndWeight = FontStyle.Bold;
             _inspectorTitle.style.fontSize = 13f;
             _inspectorTitle.style.marginBottom = 6f;
+            _inspectorTitle.style.flexShrink = 0f;
             _inspectorRoot.Add(_inspectorTitle);
 
             _nameField = new TextField("Name") { isDelayed = true };
+            _nameField.style.flexShrink = 0f;
             _nameField.RegisterValueChangedCallback(evt =>
             {
                 if (_suspendBindCallbacks) return;
@@ -204,7 +278,10 @@ namespace Nezia.Unity.Editor.Mixer
             });
             _inspectorRoot.Add(_nameField);
 
-            var gainRow = new VisualElement { style = { flexDirection = FlexDirection.Row, alignItems = Align.Center } };
+            var gainRow = new VisualElement
+            {
+                style = { flexDirection = FlexDirection.Row, alignItems = Align.Center, flexShrink = 0f },
+            };
             _gainSlider = new Slider("Gain", 0f, 4f) { value = 1f };
             _gainSlider.style.flexGrow = 1f;
             _gainSlider.RegisterValueChangedCallback(evt =>
@@ -226,6 +303,7 @@ namespace Nezia.Unity.Editor.Mixer
             _inspectorRoot.Add(gainRow);
 
             _mutedToggle = new Toggle("Muted");
+            _mutedToggle.style.flexShrink = 0f;
             _mutedToggle.RegisterValueChangedCallback(evt =>
             {
                 if (_suspendBindCallbacks) return;
@@ -240,17 +318,23 @@ namespace Nezia.Unity.Editor.Mixer
 
         private void BuildEffectsSection(VisualElement parent)
         {
-            // Effects セクションは「ヘッダ (固定高さ) + Effect 行 ScrollView (flexGrow=1)」。
-            // セクション自体を flexGrow=1 にして、親 (右ペイン) の余り高さを全部消費する。
+            // スクロールは Inspector ペイン外側 (BuildInspectorPane) が担うので、
+            // ここではセクションを自然高さで積むだけ。
             var section = new VisualElement();
             section.style.marginTop = 12f;
-            section.style.flexGrow = 1f;
-            section.style.flexShrink = 1f;
+            section.style.flexShrink = 0f;
+            section.style.flexDirection = FlexDirection.Column;
             parent.Add(section);
 
             var header = new VisualElement
             {
-                style = { flexDirection = FlexDirection.Row, alignItems = Align.Center, marginBottom = 4f, flexShrink = 0f },
+                style =
+                {
+                    flexDirection = FlexDirection.Row,
+                    alignItems = Align.Center,
+                    marginBottom = 4f,
+                    flexShrink = 0f,
+                },
             };
             var title = new Label("Effects");
             title.style.unityFontStyleAndWeight = FontStyle.Bold;
@@ -261,19 +345,9 @@ namespace Nezia.Unity.Editor.Mixer
             header.Add(addBtn);
             section.Add(header);
 
-            // Effect 行は数が増えるため、内側だけ縦スクロール可能にする。
-            _effectsScroll = new ScrollView(ScrollViewMode.Vertical);
-            _effectsScroll.style.flexGrow = 1f;
-            _effectsScroll.style.flexShrink = 1f;
-            // ScrollView 内側の contentContainer (= contentViewport の子) は既定で
-            // コンテンツ自然サイズなので、flex-grow=1 を明示しないと viewport を埋めない。
-            // これを設定すると effect 数が少ないときも ScrollView 全体に背景色等が広がる。
-            _effectsScroll.contentContainer.style.flexGrow = 1f;
-            section.Add(_effectsScroll);
-
             _effectsRoot = new VisualElement();
-            _effectsRoot.style.flexGrow = 1f;
-            _effectsScroll.Add(_effectsRoot);
+            _effectsRoot.style.flexShrink = 0f;
+            section.Add(_effectsRoot);
         }
 
         private void ShowAddEffectMenu()
