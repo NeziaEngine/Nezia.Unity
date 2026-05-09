@@ -41,6 +41,9 @@ namespace Nezia.Unity.Editor.Mixer
         private FloatField _gainNumeric;
         private Toggle _mutedToggle;
         private Button _deleteBusButton;
+        private Label _inspectorTitle;
+        private VisualElement _effectsRoot;
+        private ScrollView _effectsScroll;
         private VisualElement _validationFooter;
 
         private bool _suspendBindCallbacks;
@@ -78,8 +81,10 @@ namespace Nezia.Unity.Editor.Mixer
         {
             var root = new VisualElement();
             root.style.flexDirection = FlexDirection.Column;
-            // Inspector pane は高さ可変なので minHeight を入れて TwoPaneSplitView が潰れないようにする。
-            root.style.minHeight = 360f;
+            // minHeight は付けない: 余分な空白を作るより、コンテンツの自然サイズに合わせる。
+            // 親 (InspectorElement) が高さを持っているケースでは flex 連鎖で広がる。
+            root.style.flexGrow = 1f;
+            root.style.flexShrink = 1f;
 
             BuildToolbar(root);
             BuildBody(root);
@@ -125,9 +130,11 @@ namespace Nezia.Unity.Editor.Mixer
         {
             // 縦割り (上 = TreeView / 下 = Inspector) — Unity Inspector は横幅が狭いので、
             // 横割りだと右ペインのフィールドが切れて見えない。上下に積む方が読み易い。
-            var split = new TwoPaneSplitView(0, 220f, TwoPaneSplitViewOrientation.Vertical);
+            // 上ペイン (TreeView) は 160px 固定スタートにして、下ペイン (Bus 編集 +
+            // effect chain) に縦スペースを多く割り当てる。スプリッタで自由に変更可能。
+            var split = new TwoPaneSplitView(0, 160f, TwoPaneSplitViewOrientation.Vertical);
             split.style.flexGrow = 1f;
-            split.style.minHeight = 360f;
+            split.style.flexShrink = 1f;
             root.Add(split);
 
             // ── 左 (TreeView を VisualElement でラップして split に渡す)──
@@ -138,6 +145,10 @@ namespace Nezia.Unity.Editor.Mixer
             // 正しく flexGrow できる。
             var leftPane = new VisualElement();
             leftPane.style.flexGrow = 1f;
+            leftPane.style.flexShrink = 1f;
+            // TwoPaneSplitView の内部 pane container を 100% 占有させる
+            // (デフォルトでは子の natural size になる)。
+            leftPane.style.height = new Length(100f, LengthUnit.Percent);
             split.Add(leftPane);
 
             _treeView = new TreeView
@@ -148,16 +159,25 @@ namespace Nezia.Unity.Editor.Mixer
                 bindItem = BindBusRow,
             };
             _treeView.style.flexGrow = 1f;
+            _treeView.style.flexShrink = 1f;
             _treeView.selectionChanged += _ => OnTreeSelectionChanged();
             ConfigureTreeDragAndDrop(_treeView);
             leftPane.Add(_treeView);
 
-            // ── 右 (Inspector) ──
+            // ── 下 (選択中 Bus の Inspector)──
+            //
+            // レイアウト方針: バス共通プロパティ (Name / Gain / Muted) は自然高さ、
+            // Effects セクションを flexGrow=1 で残りスペースを全部消費させる。
+            // Effect 行リストだけ ScrollView で内側にスクロールさせる (外側で
+            // ScrollView するとセクション全体が縮んで「下に空き領域」が出る)。
             var rightPane = new VisualElement();
             rightPane.style.paddingTop = 6f;
             rightPane.style.paddingLeft = 10f;
             rightPane.style.paddingRight = 10f;
             rightPane.style.paddingBottom = 6f;
+            rightPane.style.flexGrow = 1f;
+            rightPane.style.flexShrink = 1f;
+            rightPane.style.height = new Length(100f, LengthUnit.Percent);
             split.Add(rightPane);
 
             _inspectorPlaceholder = new Label("バスを選択するとプロパティを編集できます。");
@@ -166,12 +186,15 @@ namespace Nezia.Unity.Editor.Mixer
             rightPane.Add(_inspectorPlaceholder);
 
             _inspectorRoot = new VisualElement();
+            _inspectorRoot.style.flexGrow = 1f;
+            _inspectorRoot.style.flexShrink = 1f;
             rightPane.Add(_inspectorRoot);
 
-            var inspectorTitle = new Label("Selected Bus");
-            inspectorTitle.style.unityFontStyleAndWeight = FontStyle.Bold;
-            inspectorTitle.style.marginBottom = 6f;
-            _inspectorRoot.Add(inspectorTitle);
+            _inspectorTitle = new Label("Bus");
+            _inspectorTitle.style.unityFontStyleAndWeight = FontStyle.Bold;
+            _inspectorTitle.style.fontSize = 13f;
+            _inspectorTitle.style.marginBottom = 6f;
+            _inspectorRoot.Add(_inspectorTitle);
 
             _nameField = new TextField("Name") { isDelayed = true };
             _nameField.RegisterValueChangedCallback(evt =>
@@ -209,6 +232,298 @@ namespace Nezia.Unity.Editor.Mixer
                 CommitMutedChange(evt.newValue);
             });
             _inspectorRoot.Add(_mutedToggle);
+
+            BuildEffectsSection(_inspectorRoot);
+        }
+
+        // ─── Effects (IP-12 PR-C) ────────────────────────────────
+
+        private void BuildEffectsSection(VisualElement parent)
+        {
+            // Effects セクションは「ヘッダ (固定高さ) + Effect 行 ScrollView (flexGrow=1)」。
+            // セクション自体を flexGrow=1 にして、親 (右ペイン) の余り高さを全部消費する。
+            var section = new VisualElement();
+            section.style.marginTop = 12f;
+            section.style.flexGrow = 1f;
+            section.style.flexShrink = 1f;
+            parent.Add(section);
+
+            var header = new VisualElement
+            {
+                style = { flexDirection = FlexDirection.Row, alignItems = Align.Center, marginBottom = 4f, flexShrink = 0f },
+            };
+            var title = new Label("Effects");
+            title.style.unityFontStyleAndWeight = FontStyle.Bold;
+            title.style.flexGrow = 1f;
+            header.Add(title);
+
+            var addBtn = new Button(ShowAddEffectMenu) { text = "+ Add" };
+            header.Add(addBtn);
+            section.Add(header);
+
+            // Effect 行は数が増えるため、内側だけ縦スクロール可能にする。
+            _effectsScroll = new ScrollView(ScrollViewMode.Vertical);
+            _effectsScroll.style.flexGrow = 1f;
+            _effectsScroll.style.flexShrink = 1f;
+            // ScrollView 内側の contentContainer (= contentViewport の子) は既定で
+            // コンテンツ自然サイズなので、flex-grow=1 を明示しないと viewport を埋めない。
+            // これを設定すると effect 数が少ないときも ScrollView 全体に背景色等が広がる。
+            _effectsScroll.contentContainer.style.flexGrow = 1f;
+            section.Add(_effectsScroll);
+
+            _effectsRoot = new VisualElement();
+            _effectsRoot.style.flexGrow = 1f;
+            _effectsScroll.Add(_effectsRoot);
+        }
+
+        private void ShowAddEffectMenu()
+        {
+            var menu = new GenericMenu();
+            menu.AddItem(new GUIContent("LowPass"),    false, () => AddEffect(NeziaEffectKind.LowPass));
+            menu.AddItem(new GUIContent("HighPass"),   false, () => AddEffect(NeziaEffectKind.HighPass));
+            menu.AddItem(new GUIContent("Reverb"),     false, () => AddEffect(NeziaEffectKind.Reverb));
+            menu.AddItem(new GUIContent("Compressor"), false, () => AddEffect(NeziaEffectKind.Compressor));
+            menu.ShowAsContext();
+        }
+
+        private void AddEffect(NeziaEffectKind kind)
+        {
+            var asset = Asset;
+            if (asset == null || _selectedBusIndex < 0 || _selectedBusIndex >= asset.Buses.Count) return;
+
+            Undo.RecordObject(asset, "Add Effect");
+            var bus = GetBusListAccessor()[_selectedBusIndex];
+            if (bus.effects == null) bus.effects = new List<NeziaMixerAsset.BusEffect>();
+            NeziaMixerAsset.BusEffect spec = kind switch
+            {
+                NeziaEffectKind.LowPass    => new NeziaMixerAsset.LowPass(),
+                NeziaEffectKind.HighPass   => new NeziaMixerAsset.HighPass(),
+                NeziaEffectKind.Reverb     => new NeziaMixerAsset.Reverb(),
+                NeziaEffectKind.Compressor => new NeziaMixerAsset.Compressor(),
+                _ => null,
+            };
+            if (spec == null) return;
+            bus.effects.Add(spec);
+            ApplyEffectChange();
+        }
+
+        private void RemoveEffect(int index)
+        {
+            var asset = Asset;
+            if (asset == null || _selectedBusIndex < 0 || _selectedBusIndex >= asset.Buses.Count) return;
+            var bus = GetBusListAccessor()[_selectedBusIndex];
+            if (bus.effects == null || index < 0 || index >= bus.effects.Count) return;
+
+            Undo.RecordObject(asset, "Remove Effect");
+            bus.effects.RemoveAt(index);
+            ApplyEffectChange();
+        }
+
+        private void MoveEffect(int from, int to)
+        {
+            var asset = Asset;
+            if (asset == null || _selectedBusIndex < 0 || _selectedBusIndex >= asset.Buses.Count) return;
+            var bus = GetBusListAccessor()[_selectedBusIndex];
+            if (bus.effects == null) return;
+            if (from < 0 || from >= bus.effects.Count) return;
+            if (to < 0 || to >= bus.effects.Count) return;
+            if (from == to) return;
+
+            Undo.RecordObject(asset, "Reorder Effect");
+            var item = bus.effects[from];
+            bus.effects.RemoveAt(from);
+            bus.effects.Insert(to, item);
+            ApplyEffectChange();
+        }
+
+        /// <summary>Effect chain 操作後の共通仕上げ。再描画 + dirty マーク + cache 破棄。</summary>
+        private void ApplyEffectChange()
+        {
+            var asset = Asset;
+            if (asset == null) return;
+            asset.InvalidateResolvedCache();
+            EditorUtility.SetDirty(asset);
+            RefreshEffectRows();
+        }
+
+        /// <summary>選択中バスの effect chain 行を再構築する。</summary>
+        private void RefreshEffectRows()
+        {
+            if (_effectsRoot == null) return;
+            _effectsRoot.Clear();
+
+            var asset = Asset;
+            if (asset == null || _selectedBusIndex < 0 || _selectedBusIndex >= asset.Buses.Count) return;
+            var bus = asset.Buses[_selectedBusIndex];
+            var effects = bus?.effects;
+            if (effects == null || effects.Count == 0)
+            {
+                var empty = new Label("No effects. Click + Add to insert one.");
+                empty.style.color = new Color(0.6f, 0.6f, 0.6f);
+                empty.style.marginTop = 2f;
+                _effectsRoot.Add(empty);
+                return;
+            }
+
+            for (int i = 0; i < effects.Count; i++)
+            {
+                _effectsRoot.Add(BuildEffectRow(effects[i], i, effects.Count));
+            }
+        }
+
+        private VisualElement BuildEffectRow(NeziaMixerAsset.BusEffect effect, int index, int total)
+        {
+            var row = new VisualElement();
+            row.style.marginTop = 4f;
+            row.style.borderTopWidth = 1f;
+            row.style.borderBottomWidth = 1f;
+            row.style.borderLeftWidth = 1f;
+            row.style.borderRightWidth = 1f;
+            row.style.borderTopColor = row.style.borderBottomColor = row.style.borderLeftColor = row.style.borderRightColor = new Color(0f, 0f, 0f, 0.25f);
+            row.style.paddingTop = 4f;
+            row.style.paddingBottom = 4f;
+            row.style.paddingLeft = 6f;
+            row.style.paddingRight = 6f;
+
+            // ── ヘッダ: ↑ ↓ | kind 名 + enabled toggle | ×
+            var header = new VisualElement
+            {
+                style = { flexDirection = FlexDirection.Row, alignItems = Align.Center, marginBottom = 4f },
+            };
+
+            var upBtn = new Button(() => MoveEffect(index, index - 1)) { text = "▲" };
+            upBtn.style.width = 24f;
+            upBtn.SetEnabled(index > 0);
+            header.Add(upBtn);
+
+            var downBtn = new Button(() => MoveEffect(index, index + 1)) { text = "▼" };
+            downBtn.style.width = 24f;
+            downBtn.SetEnabled(index < total - 1);
+            header.Add(downBtn);
+
+            var kindLabel = new Label(effect.Kind.ToString());
+            kindLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            kindLabel.style.flexGrow = 1f;
+            kindLabel.style.marginLeft = 6f;
+            header.Add(kindLabel);
+
+            var enabledToggle = new Toggle { value = effect.enabled, tooltip = "Enabled" };
+            enabledToggle.RegisterValueChangedCallback(evt =>
+            {
+                Undo.RecordObject(Asset, "Toggle Effect Enabled");
+                effect.enabled = evt.newValue;
+                EditorUtility.SetDirty(Asset);
+            });
+            header.Add(enabledToggle);
+
+            var removeBtn = new Button(() => RemoveEffect(index)) { text = "×" };
+            removeBtn.style.width = 24f;
+            removeBtn.style.marginLeft = 4f;
+            header.Add(removeBtn);
+
+            row.Add(header);
+
+            // ── Position (Pre / Post) — 全 effect 共通 ──
+            var positionField = new EnumField("Position", effect.position);
+            positionField.RegisterValueChangedCallback(evt =>
+            {
+                Undo.RecordObject(Asset, "Change Effect Position");
+                effect.position = (NeziaEffectPosition)evt.newValue;
+                EditorUtility.SetDirty(Asset);
+            });
+            row.Add(positionField);
+
+            // ── Per-kind フィールド ──
+            switch (effect)
+            {
+                case NeziaMixerAsset.LowPass lp:    BuildLowPassFields(row, lp); break;
+                case NeziaMixerAsset.HighPass hp:   BuildHighPassFields(row, hp); break;
+                case NeziaMixerAsset.Reverb rv:     BuildReverbFields(row, rv); break;
+                case NeziaMixerAsset.Compressor cp: BuildCompressorFields(row, cp); break;
+            }
+            return row;
+        }
+
+        private void BuildLowPassFields(VisualElement row, NeziaMixerAsset.LowPass spec)
+        {
+            row.Add(MakeBoundFloatSlider("Cutoff", 20f, 20000f, spec.cutoff,
+                v => { Undo.RecordObject(Asset, "Edit LowPass Cutoff"); spec.cutoff = v; EditorUtility.SetDirty(Asset); }));
+            row.Add(MakeBoundFloatSlider("Q", 0.1f, 10f, spec.q,
+                v => { Undo.RecordObject(Asset, "Edit LowPass Q"); spec.q = v; EditorUtility.SetDirty(Asset); }));
+        }
+
+        private void BuildHighPassFields(VisualElement row, NeziaMixerAsset.HighPass spec)
+        {
+            row.Add(MakeBoundFloatSlider("Cutoff", 20f, 20000f, spec.cutoff,
+                v => { Undo.RecordObject(Asset, "Edit HighPass Cutoff"); spec.cutoff = v; EditorUtility.SetDirty(Asset); }));
+            row.Add(MakeBoundFloatSlider("Q", 0.1f, 10f, spec.q,
+                v => { Undo.RecordObject(Asset, "Edit HighPass Q"); spec.q = v; EditorUtility.SetDirty(Asset); }));
+        }
+
+        private void BuildReverbFields(VisualElement row, NeziaMixerAsset.Reverb spec)
+        {
+            row.Add(MakeBoundFloatSlider("Room Size", 0f, 1f, spec.roomSize,
+                v => { Undo.RecordObject(Asset, "Edit Reverb"); spec.roomSize = v; EditorUtility.SetDirty(Asset); }));
+            row.Add(MakeBoundFloatSlider("Damping", 0f, 1f, spec.damping,
+                v => { Undo.RecordObject(Asset, "Edit Reverb"); spec.damping = v; EditorUtility.SetDirty(Asset); }));
+            row.Add(MakeBoundFloatSlider("Wet", 0f, 1f, spec.wet,
+                v => { Undo.RecordObject(Asset, "Edit Reverb"); spec.wet = v; EditorUtility.SetDirty(Asset); }));
+            row.Add(MakeBoundFloatSlider("Dry", 0f, 1f, spec.dry,
+                v => { Undo.RecordObject(Asset, "Edit Reverb"); spec.dry = v; EditorUtility.SetDirty(Asset); }));
+            row.Add(MakeBoundFloatSlider("Width", 0f, 1f, spec.width,
+                v => { Undo.RecordObject(Asset, "Edit Reverb"); spec.width = v; EditorUtility.SetDirty(Asset); }));
+        }
+
+        private void BuildCompressorFields(VisualElement row, NeziaMixerAsset.Compressor spec)
+        {
+            row.Add(MakeBoundFloat("Threshold dB", spec.thresholdDb,
+                v => { Undo.RecordObject(Asset, "Edit Compressor"); spec.thresholdDb = v; EditorUtility.SetDirty(Asset); }));
+            row.Add(MakeBoundFloat("Ratio", spec.ratio,
+                v => { Undo.RecordObject(Asset, "Edit Compressor"); spec.ratio = v; EditorUtility.SetDirty(Asset); }));
+            row.Add(MakeBoundFloat("Attack ms", spec.attackMs,
+                v => { Undo.RecordObject(Asset, "Edit Compressor"); spec.attackMs = v; EditorUtility.SetDirty(Asset); }));
+            row.Add(MakeBoundFloat("Release ms", spec.releaseMs,
+                v => { Undo.RecordObject(Asset, "Edit Compressor"); spec.releaseMs = v; EditorUtility.SetDirty(Asset); }));
+            row.Add(MakeBoundFloat("Knee dB", spec.kneeDb,
+                v => { Undo.RecordObject(Asset, "Edit Compressor"); spec.kneeDb = v; EditorUtility.SetDirty(Asset); }));
+            row.Add(MakeBoundFloat("Makeup dB", spec.makeupDb,
+                v => { Undo.RecordObject(Asset, "Edit Compressor"); spec.makeupDb = v; EditorUtility.SetDirty(Asset); }));
+        }
+
+        /// <summary>Slider + 数値フィールド合成の編集行。</summary>
+        private static VisualElement MakeBoundFloatSlider(string label, float min, float max, float initial, System.Action<float> commit)
+        {
+            var row = new VisualElement { style = { flexDirection = FlexDirection.Row, alignItems = Align.Center } };
+            var slider = new Slider(label, min, max) { value = initial };
+            slider.style.flexGrow = 1f;
+            var num = new FloatField { value = initial, isDelayed = true };
+            num.style.width = 60f;
+            num.style.marginLeft = 4f;
+
+            slider.RegisterValueChangedCallback(evt =>
+            {
+                num.SetValueWithoutNotify(evt.newValue);
+                commit(evt.newValue);
+            });
+            num.RegisterValueChangedCallback(evt =>
+            {
+                var clamped = Mathf.Clamp(evt.newValue, min, max);
+                slider.SetValueWithoutNotify(clamped);
+                if (!Mathf.Approximately(evt.newValue, clamped))
+                    num.SetValueWithoutNotify(clamped);
+                commit(clamped);
+            });
+            row.Add(slider);
+            row.Add(num);
+            return row;
+        }
+
+        /// <summary>範囲制約のない数値編集行（Compressor 用）。</summary>
+        private static VisualElement MakeBoundFloat(string label, float initial, System.Action<float> commit)
+        {
+            var f = new FloatField(label) { value = initial, isDelayed = true };
+            f.RegisterValueChangedCallback(evt => commit(evt.newValue));
+            return f;
         }
 
         private void BuildValidationFooter(VisualElement root)
@@ -415,6 +730,15 @@ namespace Nezia.Unity.Editor.Mixer
             {
                 _suspendBindCallbacks = false;
             }
+
+            // 見出しに選択中バス名を反映する（空名 bus は (unnamed) と表示）。
+            if (_inspectorTitle != null)
+            {
+                _inspectorTitle.text = string.IsNullOrEmpty(node.name) ? "(unnamed)" : node.name;
+            }
+
+            // Effect chain は per-effect の値が異なるので、毎回完全再構築する。
+            RefreshEffectRows();
         }
 
         // ─── 編集操作 ────────────────────────────────────────────

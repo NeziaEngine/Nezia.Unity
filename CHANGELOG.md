@@ -9,6 +9,20 @@
 
 ### Added
 
+- **IP-12 PR-C Effect chain ペイン** — `NeziaMixerInspector` の右ペインに
+  選択中バスの Effect chain 編集 UI を追加。
+  - **`+ Add` ドロップダウン** で `LowPass` / `HighPass` / `Reverb` / `Compressor`
+    を追加
+  - 各 effect 行: ヘッダ (`▲` / `▼` で順序入れ替え / kind ラベル / `enabled`
+    トグル / `×` 削除) + `Position` (Pre / Post) + kind 固有パラメータ
+  - per-kind フィールド:
+    - `LowPass` / `HighPass`: cutoff (20〜20000) / Q (0.1〜10)
+    - `Reverb`: roomSize / damping / wet / dry / width (各 0〜1)
+    - `Compressor`: thresholdDb / ratio / attackMs / releaseMs / kneeDb / makeupDb
+  - 全編集 `Undo.RecordObject` 経由 (Ctrl+Z 対応)、編集後は
+    `InvalidateResolvedCache` で次回 Resolve 時に effect chain を再構築させる
+  - 右ペインを `ScrollView` でラップし、effect が増えても縦に伸ばせる
+
 - **IP-12 PR-A / PR-B `NeziaMixerInspector` (Custom Inspector)** —
   `NeziaMixerAsset` を Project ビューで選択するか `Project Settings > Nezia` の
   inline Inspector から、専用 UI でバスツリーを編集できるようになった。
