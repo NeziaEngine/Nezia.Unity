@@ -9,6 +9,22 @@
 
 ### Added
 
+- **IP-12 PR-2 Bus ノード編集** — `.neziamixer` 上で実際にバスツリーを
+  ノードグラフとして組み立てられるようになった。
+  - `NeziaMixerBusNode : Node` (Editor) — バスツリーの 1 バスを表す GTK ノード。
+    `Parent` (input, single) ↔ `Output` (output, multi-out) の構造ポートで親子
+    配線を表現。`Gain` (float) / `Muted` (bool) は input port の embedded value
+    としてノード上でインライン編集できる。バス名は `[SerializeField]` で保持
+  - `BusFlow` — Bus → Bus の構造接続を表すポート型マーカー
+  - `NeziaMixerImporter.CompileGraph` を実装 — 全 `NeziaMixerBusNode` を走査し、
+    Parent ポート接続から `parent` を解決して `NeziaMixerAsset.buses` に書き出す。
+    空名 / 重複名は import エラーとして Console に通知され、該当ノードはスキップ
+  - `NeziaMixerGraph.OnGraphChanged` — 空名 / 重複名 / 親子循環を validate し、
+    GTK のノード上エラーマーカーで可視化
+  - `NeziaMixerAsset` に Editor / Importer 用 internal API
+    (`SetBusesForImporter` / `SetSendsForImporter`) を追加。Inspector 経由の
+    既存編集経路は無影響
+
 - **IP-12 PR-1 Mixer Graph Importer（ScriptedImporter スキャフォールド）** —
   Unity 6.2 公式リリースの **Graph Toolkit
   (`com.unity.graphtoolkit`)** をベースにバスツリー編集をノードグラフ化する。
