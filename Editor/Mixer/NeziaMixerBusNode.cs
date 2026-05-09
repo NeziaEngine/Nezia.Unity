@@ -50,18 +50,18 @@ namespace Nezia.Unity.Editor.Mixer
         {
             // バスのプロパティはエッジ接続不可な Node Option として宣言する。
             // ノードヘッダ下と Inspector の両方にインライン編集 UI が出る。
-            context.AddNodeOption<string>(BusNameOptionName)
+            context.AddOption<string>(BusNameOptionName)
                 .WithDefaultValue(DefaultBusName)
                 .WithTooltip("バスの論理名。NeziaSoundAsset.OutputBusName 等から参照されるキー。" +
                              "アセット内で一意。")
                 .Build();
 
-            context.AddNodeOption<float>(GainOptionName)
+            context.AddOption<float>(GainOptionName)
                 .WithDefaultValue(1f)
                 .WithTooltip("バスゲイン (倍率)。1.0 = 0dB。")
                 .Build();
 
-            context.AddNodeOption<bool>(MutedOptionName)
+            context.AddOption<bool>(MutedOptionName)
                 .WithDefaultValue(false)
                 .WithTooltip("ミュート初期値。")
                 .Build();
