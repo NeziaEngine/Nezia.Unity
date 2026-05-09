@@ -28,18 +28,15 @@ namespace Nezia.Unity.Editor.Mixer
     [CustomEditor(typeof(NeziaMixerAsset))]
     public sealed class NeziaMixerInspector : UnityEditor.Editor
     {
-        private enum Tab { Buses, Sends }
-
         // ─── 状態 ────────────────────────────────────────────────
 
         [SerializeField] private int _selectedBusIndex = -1;
-        [SerializeField] private Tab _activeTab = Tab.Buses;
+        [SerializeField] private int _activeTabIndex;
 
         // ── UI 参照 ──
-        private VisualElement _busesView;
-        private VisualElement _sendsView;
-        private Button _busesTabBtn;
-        private Button _sendsTabBtn;
+        private TabView _tabView;
+        private Tab _busesTab;
+        private Tab _sendsTab;
         private TreeView _treeView;
         private VisualElement _inspectorRoot;
         private Label _inspectorPlaceholder;
@@ -110,30 +107,9 @@ namespace Nezia.Unity.Editor.Mixer
             root.style.flexShrink = 0f;
             BindRootHeightToInspectorWindow(root);
 
-            BuildTabStrip(root);
-
-            // Buses タブ: Toolbar + TreeView + 区切り + Inspector ペイン。
-            _busesView = new VisualElement();
-            _busesView.style.flexDirection = FlexDirection.Column;
-            _busesView.style.flexGrow = 1f;
-            _busesView.style.flexShrink = 1f;
-            root.Add(_busesView);
-            BuildToolbar(_busesView);
-            BuildTreePane(_busesView);
-            BuildPaneSeparator(_busesView);
-            BuildInspectorPane(_busesView);
-
-            // Sends タブ: 配線リストの ScrollView。
-            _sendsView = new VisualElement();
-            _sendsView.style.flexDirection = FlexDirection.Column;
-            _sendsView.style.flexGrow = 1f;
-            _sendsView.style.flexShrink = 1f;
-            root.Add(_sendsView);
-            BuildSendsPane(_sendsView);
-
+            BuildTabs(root);
             BuildValidationFooter(root);
 
-            ApplyActiveTab();
             // delayCall は Inspector のライフサイクルと相性が悪い (再構築毎に古い
             // callback が残る) ため、即時で初期描画する。
             RefreshTree();
@@ -206,64 +182,35 @@ namespace Nezia.Unity.Editor.Mixer
             });
         }
 
-        // ─── タブストリップ ────────────────────────────────────────
+        // ─── タブ (UI Toolkit TabView) ────────────────────────────
 
-        private void BuildTabStrip(VisualElement root)
+        private void BuildTabs(VisualElement root)
         {
-            var strip = new VisualElement
+            _tabView = new TabView();
+            _tabView.style.flexGrow = 1f;
+            _tabView.style.flexShrink = 1f;
+
+            _busesTab = new Tab("Buses");
+            // Tab の中身 (contentContainer) に既存のバス編集 UI を積む。
+            BuildToolbar(_busesTab);
+            BuildTreePane(_busesTab);
+            BuildPaneSeparator(_busesTab);
+            BuildInspectorPane(_busesTab);
+            _tabView.Add(_busesTab);
+
+            _sendsTab = new Tab("Sends");
+            BuildSendsPane(_sendsTab);
+            _tabView.Add(_sendsTab);
+
+            // 選択状態の永続化。
+            _tabView.selectedTabIndex = Mathf.Clamp(_activeTabIndex, 0, 1);
+            _tabView.activeTabChanged += (_, current) =>
             {
-                style =
-                {
-                    flexDirection = FlexDirection.Row,
-                    flexShrink = 0f,
-                    borderBottomWidth = 1f,
-                    borderBottomColor = new Color(0f, 0f, 0f, 0.3f),
-                    marginBottom = 2f,
-                },
+                _activeTabIndex = _tabView.selectedTabIndex;
+                if (current == _sendsTab) RefreshSendsList();
             };
 
-            _busesTabBtn = new Button(() => SetActiveTab(Tab.Buses)) { text = "Buses" };
-            _sendsTabBtn = new Button(() => SetActiveTab(Tab.Sends)) { text = "Sends" };
-            foreach (var btn in new[] { _busesTabBtn, _sendsTabBtn })
-            {
-                btn.style.flexGrow = 1f;
-                btn.style.marginLeft = 0f;
-                btn.style.marginRight = 0f;
-                btn.style.marginTop = 0f;
-                btn.style.marginBottom = 0f;
-                btn.style.borderTopLeftRadius = 0f;
-                btn.style.borderTopRightRadius = 0f;
-                btn.style.borderBottomLeftRadius = 0f;
-                btn.style.borderBottomRightRadius = 0f;
-                strip.Add(btn);
-            }
-            root.Add(strip);
-        }
-
-        private void SetActiveTab(Tab tab)
-        {
-            if (_activeTab == tab) return;
-            _activeTab = tab;
-            ApplyActiveTab();
-        }
-
-        private void ApplyActiveTab()
-        {
-            if (_busesView != null)
-                _busesView.style.display = _activeTab == Tab.Buses ? DisplayStyle.Flex : DisplayStyle.None;
-            if (_sendsView != null)
-                _sendsView.style.display = _activeTab == Tab.Sends ? DisplayStyle.Flex : DisplayStyle.None;
-
-            // タブのアクティブ強調 (UI Toolkit の Button にデフォルト active 表現が
-            // 無いため、フォントウェイトで区別する)。
-            if (_busesTabBtn != null)
-                _busesTabBtn.style.unityFontStyleAndWeight =
-                    _activeTab == Tab.Buses ? FontStyle.Bold : FontStyle.Normal;
-            if (_sendsTabBtn != null)
-                _sendsTabBtn.style.unityFontStyleAndWeight =
-                    _activeTab == Tab.Sends ? FontStyle.Bold : FontStyle.Normal;
-
-            if (_activeTab == Tab.Sends) RefreshSendsList();
+            root.Add(_tabView);
         }
 
         private void BuildToolbar(VisualElement root)
