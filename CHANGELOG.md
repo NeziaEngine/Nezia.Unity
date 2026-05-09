@@ -31,6 +31,19 @@
   - `ResolveEffects(busName)` / `ResolveEffect(busName, index)` で実体化後の
     `NeziaEffect` ハンドルを取得（ランタイムでのパラメータ調整用）
 
+- `NeziaSnapshotAsset`（`ScriptableObject`、IP-3 PR-A）— `NeziaMixerAsset` 上の
+  バス状態を Inspector で宣言し、ランタイムで `asset.Apply(fadeSeconds)` 一発に
+  適用できる Snapshot アセット。Phase 1 はバスゲイン / ミュートのみ対応
+  （Send ゲイン / エフェクトパラメータは Phase 2 で追加予定）。
+  - `BusOverride { busName, overrideGain, gain, overrideMuted, muted }` —
+    `overrideGain` / `overrideMuted` フラグで「ゲインだけ」「ミュートだけ」を
+    独立に積むことを表現
+  - `Apply(fadeSeconds)` 内部で `NeziaSnapshot.Begin → Commit → Apply → Destroy`
+    まで完結（永続ハンドルは保持しない）
+  - `Validate()`（Editor 専用）— mixer 未設定 / 未知バス名 / 重複バス名を検出。
+    `OnValidate` から自動で呼ばれ Console に warning として出る
+  - `Nezia/Snapshot Asset` メニューから生成可
+
 - `NeziaEffect` に kind 別の type-safe ラッパを追加（IP-2）:
   - `effect.AsLowPass()` → `NeziaLowPassEffect` (`Cutoff`, `Q`)
   - `effect.AsHighPass()` → `NeziaHighPassEffect` (`Cutoff`, `Q`)
