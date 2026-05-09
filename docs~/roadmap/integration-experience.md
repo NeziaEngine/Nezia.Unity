@@ -384,9 +384,9 @@ MyMixer.neziamixer
 
 - `NeziaMixerBusNode : Node` — バスツリー上の 1 バスを表すノード
   - `Parent` (input, single) ↔ `Output` (output, multi-out) の構造ポートで親子配線
-  - `Gain` (float, default 1.0) / `Muted` (bool, default false) は input port の
-    embedded value としてノード上でインライン編集
-  - `_busName` は `[SerializeField]` で構造同定キーとして保持
+  - `BusName` / `Gain` / `Muted` はエッジ接続不可な **Node Option** として宣言
+    （他ノードからの dynamic 駆動を想定しないため）。ノードヘッダ下と Inspector
+    の両方にインライン編集 UI が出る
 - `NeziaMixerImporter.CompileGraph` を実装 — 全 `NeziaMixerBusNode` を走査し、
   Parent ポート接続から `parent` を解決して `NeziaMixerAsset.buses` に書き出す
 - `NeziaMixerGraph.OnGraphChanged` — 空名 / 重複名 / 親子循環を validate し、

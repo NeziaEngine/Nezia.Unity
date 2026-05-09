@@ -23,7 +23,7 @@ namespace Nezia.Unity.Editor.Mixer
     /// Effect / Send は IP-12 PR-3 / PR-4 で順次追加。
     /// </para>
     /// </summary>
-    [ScriptedImporter(version: 2, ext: NeziaMixerGraph.AssetExtension)]
+    [ScriptedImporter(version: 3, ext: NeziaMixerGraph.AssetExtension)]
     public sealed class NeziaMixerImporter : ScriptedImporter
     {
         public override void OnImportAsset(AssetImportContext ctx)
@@ -83,8 +83,8 @@ namespace Nezia.Unity.Editor.Mixer
                 {
                     name = name,
                     parent = ResolveParentName(node),
-                    gain = ResolveFloatPort(node, NeziaMixerBusNode.GainPortName, 1f),
-                    muted = ResolveBoolPort(node, NeziaMixerBusNode.MutedPortName, false),
+                    gain = ResolveOption<float>(node, NeziaMixerBusNode.GainOptionName, 1f),
+                    muted = ResolveOption<bool>(node, NeziaMixerBusNode.MutedOptionName, false),
                 });
             }
 
@@ -104,18 +104,14 @@ namespace Nezia.Unity.Editor.Mixer
             return string.Empty;
         }
 
-        private static float ResolveFloatPort(NeziaMixerBusNode node, string portName, float fallback)
+        /// <summary>
+        /// 指定された Node Option の値を読み出す。未定義 / 型不一致時は <paramref name="fallback"/> を返す。
+        /// </summary>
+        private static T ResolveOption<T>(NeziaMixerBusNode node, string optionName, T fallback)
         {
-            var port = node.GetInputPortByName(portName);
-            if (port == null) return fallback;
-            return port.TryGetValue<float>(out var value) ? value : fallback;
-        }
-
-        private static bool ResolveBoolPort(NeziaMixerBusNode node, string portName, bool fallback)
-        {
-            var port = node.GetInputPortByName(portName);
-            if (port == null) return fallback;
-            return port.TryGetValue<bool>(out var value) ? value : fallback;
+            var opt = node.GetNodeOptionByName(optionName);
+            if (opt == null) return fallback;
+            return opt.TryGetValue<T>(out var value) ? value : fallback;
         }
     }
 }

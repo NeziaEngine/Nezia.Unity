@@ -13,8 +13,9 @@
   ノードグラフとして組み立てられるようになった。
   - `NeziaMixerBusNode : Node` (Editor) — バスツリーの 1 バスを表す GTK ノード。
     `Parent` (input, single) ↔ `Output` (output, multi-out) の構造ポートで親子
-    配線を表現。`Gain` (float) / `Muted` (bool) は input port の embedded value
-    としてノード上でインライン編集できる。バス名は `[SerializeField]` で保持
+    配線を表現。`BusName` / `Gain` / `Muted` はエッジ接続不可な **Node Option**
+    として宣言（他ノードからの dynamic 駆動を想定しないため）。ノードヘッダ下と
+    Inspector の両方にインライン編集 UI が出る
   - `BusFlow` — Bus → Bus の構造接続を表すポート型マーカー
   - `NeziaMixerImporter.CompileGraph` を実装 — 全 `NeziaMixerBusNode` を走査し、
     Parent ポート接続から `parent` を解決して `NeziaMixerAsset.buses` に書き出す。

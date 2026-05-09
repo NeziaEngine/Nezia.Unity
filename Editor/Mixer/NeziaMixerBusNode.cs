@@ -1,6 +1,5 @@
 using System;
 using Unity.GraphToolkit.Editor;
-using UnityEngine;
 
 namespace Nezia.Unity.Editor.Mixer
 {
@@ -8,7 +7,7 @@ namespace Nezia.Unity.Editor.Mixer
     /// バスツリー上の 1 バスを表すノード（IP-12 PR-2）。
     ///
     /// <para>
-    /// <b>ポート構成</b>:
+    /// <b>ポート</b>:
     /// <list type="bullet">
     ///   <item><c>Parent</c>（input, single）— 親バスの <c>Output</c> ポートと接続する。
     ///         未接続なら master 直下扱いになる。</item>
@@ -18,9 +17,9 @@ namespace Nezia.Unity.Editor.Mixer
     /// </para>
     ///
     /// <para>
-    /// <b>パラメータ</b>: バス名 / Gain / Muted。Gain・Muted は GTK のインプットポートに
-    /// 既定値として埋め込み、ノード上でインライン編集できるようにする。バス名は
-    /// 構造同定キーなので素の <c>[SerializeField]</c> として持つ。
+    /// <b>Node Options</b>（ポートではない設定値）: <c>BusName</c> / <c>Gain</c> / <c>Muted</c>。
+    /// 他ノードからの dynamic 駆動を想定しないバスのプロパティは GTK の Node Option として
+    /// 宣言する。ノードヘッダ下と Inspector に表示され、エッジ接続の対象にはならない。
     /// </para>
     ///
     /// <para>
@@ -31,30 +30,52 @@ namespace Nezia.Unity.Editor.Mixer
     [Serializable]
     public sealed class NeziaMixerBusNode : Node
     {
-        // ポート名定数。Importer / Validator から型安全に参照する。
+        // ポート / オプション名定数。Importer / Validator から型安全に参照する。
         internal const string ParentPortName = "Parent";
         internal const string OutputPortName = "Output";
-        internal const string GainPortName = "Gain";
-        internal const string MutedPortName = "Muted";
+        internal const string BusNameOptionName = "BusName";
+        internal const string GainOptionName = "Gain";
+        internal const string MutedOptionName = "Muted";
 
-        [SerializeField, Tooltip(
-            "バスの論理名。NeziaSoundAsset.OutputBusName 等から参照されるキー。" +
-            "アセット内で一意。空の場合は import 時にエラーが報告される。")]
-        private string _busName = "Bus";
-
-        /// <summary>このノードが表すバスの論理名。</summary>
-        public string BusName => _busName;
+        internal const string DefaultBusName = "Bus";
 
         protected override void OnDefinePorts(IPortDefinitionContext context)
         {
             // 構造ポート: Parent (input / single) ↔ Output (output / multi-out)。
             context.AddInputPort<BusFlow>(ParentPortName).Build();
             context.AddOutputPort<BusFlow>(OutputPortName).Build();
+        }
 
-            // 値ポート: Gain (float, default 1.0) と Muted (bool, default false)。
-            // 入力ポートに既定値を埋め込むことで、ノード上でインライン編集が可能。
-            context.AddInputPort<float>(GainPortName).WithDefaultValue(1f).Build();
-            context.AddInputPort<bool>(MutedPortName).WithDefaultValue(false).Build();
+        protected override void OnDefineOptions(IOptionDefinitionContext context)
+        {
+            // バスのプロパティはエッジ接続不可な Node Option として宣言する。
+            // ノードヘッダ下と Inspector の両方にインライン編集 UI が出る。
+            context.AddNodeOption<string>(BusNameOptionName)
+                .WithDefaultValue(DefaultBusName)
+                .WithTooltip("バスの論理名。NeziaSoundAsset.OutputBusName 等から参照されるキー。" +
+                             "アセット内で一意。")
+                .Build();
+
+            context.AddNodeOption<float>(GainOptionName)
+                .WithDefaultValue(1f)
+                .WithTooltip("バスゲイン (倍率)。1.0 = 0dB。")
+                .Build();
+
+            context.AddNodeOption<bool>(MutedOptionName)
+                .WithDefaultValue(false)
+                .WithTooltip("ミュート初期値。")
+                .Build();
+        }
+
+        /// <summary>このノードが表すバスの論理名。Node Option 値。</summary>
+        public string BusName
+        {
+            get
+            {
+                var opt = GetNodeOptionByName(BusNameOptionName);
+                return opt != null && opt.TryGetValue<string>(out var v) && v != null
+                    ? v : string.Empty;
+            }
         }
     }
 }
