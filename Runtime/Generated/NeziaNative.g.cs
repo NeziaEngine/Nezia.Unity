@@ -493,6 +493,8 @@ namespace Nezia.Native
         ///  `param` は種別ごとに以下を意味する:
         ///  - LPF / HPF: 0=Cutoff (Hz), 1=Q
         ///  - Reverb: 0=RoomSize, 1=Damping, 2=Wet, 3=Dry, 4=Width (すべて [0.0, 1.0] 正規化値)
+        ///  - Compressor: 0=ThresholdDb, 1=Ratio, 2=AttackMs, 3=ReleaseMs, 4=KneeDb, 5=MakeupDb
+        ///  - PeakingEq: 0=CenterHz, 1=Q, 2=GainDb (`[-24.0, +24.0]` クランプ、0 で素通し)
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_effect_set_param", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern NeziaResult nezia_effect_set_param(NeziaEngine* engine, NeziaEntityId effect, byte param, float value);
@@ -632,7 +634,7 @@ namespace Nezia.Native
         /// <summary>
         ///  エフェクトパラメータを Snapshot に追加する。
         ///
-        ///  `kind` は `NeziaEffectKind` (Lpf=0 / Hpf=1 / Reverb=2 / Compressor=3)、
+        ///  `kind` は `NeziaEffectKind` (Lpf=0 / Hpf=1 / Reverb=2 / Compressor=3 / PeakingEq=4)、
         ///  `param` は種別ごとのパラメータインデックス (`nezia_effect_set_param` と同じ意味)。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_snapshot_builder_set_effect_param", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -988,6 +990,10 @@ namespace Nezia.Native
         Hpf = 1,
         Reverb = 2,
         Compressor = 3,
+        /// <summary>
+        ///  Phase 3-5: Parametric / Peaking EQ。1 effect = 1 band。
+        /// </summary>
+        PeakingEq = 4,
     }
 
     /// <summary>
