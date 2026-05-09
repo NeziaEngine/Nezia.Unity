@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Unity.GraphToolkit.Editor;
 using UnityEditor;
 using UnityEngine;
+using Nezia.Unity.Editor.Mixer;
 
 namespace Nezia.Unity.Editor
 {
@@ -22,6 +24,7 @@ namespace Nezia.Unity.Editor
         private const string SettingsPath = "Project/Nezia";
         private const string DefaultAssetDir = "Assets/Settings";
         private const string DefaultAssetPath = DefaultAssetDir + "/NeziaSettings.asset";
+        private const string DefaultMixerPath = DefaultAssetDir + "/DefaultMixer." + NeziaMixerGraph.AssetExtension;
         private static readonly string[] SettingsKeywords = new[] { "Nezia", "Audio", "Mixer", "Bus" };
 
         private static UnityEditor.Editor s_inlineEditor;
@@ -36,10 +39,8 @@ namespace Nezia.Unity.Editor
             // AssetDatabase は domain reload 直後だと未準備なことがあるので 1 フレーム遅延させる。
             EditorApplication.delayCall += () =>
             {
-                if (EditorBuildSettings.TryGetConfigObject(NeziaSettings.ConfigName, out NeziaSettings existing)
-                    && existing != null)
-                    return;
-                GetOrCreate();
+                var settings = GetOrCreate();
+                if (settings != null) EnsureDefaultMixer(settings);
             };
         }
 
@@ -84,6 +85,39 @@ namespace Nezia.Unity.Editor
             AssignSettings(asset);
             Debug.Log($"[Nezia] Created default settings at {assetPath}", asset);
             return asset;
+        }
+
+        /// <summary>
+        /// <see cref="NeziaSettings"/> の <c>defaultMixer</c> が未設定の場合に
+        /// <c>Assets/Settings/DefaultMixer.neziamixer</c> を新規生成し、自動アサインする。
+        /// 既に設定済みの場合は何もしない。
+        /// </summary>
+        private static void EnsureDefaultMixer(NeziaSettings settings)
+        {
+            if (settings.DefaultMixer != null) return;
+
+            // 既に DefaultMixer.neziamixer がプロジェクトに存在すればそれを採用する。
+            var existing = AssetDatabase.LoadAssetAtPath<NeziaMixerAsset>(DefaultMixerPath);
+            if (existing == null)
+            {
+                if (!AssetDatabase.IsValidFolder(DefaultAssetDir))
+                    AssetDatabase.CreateFolder("Assets", "Settings");
+                // GraphDatabase.CreateGraph が新しい .neziamixer を作成し、
+                // Importer (NeziaMixerImporter) が main asset として NeziaMixerAsset を生成する。
+                GraphDatabase.CreateGraph<NeziaMixerGraph>(DefaultMixerPath);
+                AssetDatabase.ImportAsset(DefaultMixerPath, ImportAssetOptions.ForceSynchronousImport);
+                existing = AssetDatabase.LoadAssetAtPath<NeziaMixerAsset>(DefaultMixerPath);
+                if (existing != null)
+                    Debug.Log($"[Nezia] Created default mixer at {DefaultMixerPath}", existing);
+            }
+
+            if (existing == null) return;
+
+            var so = new SerializedObject(settings);
+            so.FindProperty("_defaultMixer").objectReferenceValue = existing;
+            so.ApplyModifiedProperties();
+            AssetDatabase.SaveAssetIfDirty(settings);
+            NeziaSettings.InvalidateCache();
         }
 
         [SettingsProvider]

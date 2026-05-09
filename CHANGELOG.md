@@ -9,6 +9,22 @@
 
 ### Added
 
+- **IP-12 PR-1 Mixer Graph Importer（ScriptedImporter スキャフォールド）** —
+  Unity 6.2 公式リリースの **Graph Toolkit
+  (`com.unity.graphtoolkit`)** をベースにバスツリー編集をノードグラフ化する。
+  Shader Graph の `.shadergraph → .shader` パターンを踏襲し、
+  `.neziamixer` ファイル 1 つの中に source の `NeziaMixerGraph`（Editor 専用）と
+  main asset の `NeziaMixerAsset`（Runtime SO）を同居させる。
+  - `NeziaMixerGraph : Graph`（Editor）— `[Graph("neziamixer")]` 付きのグラフ型
+  - `NeziaMixerImporter : ScriptedImporter`（Editor）— インポート時に
+    `NeziaMixerAsset` SO を main asset として生成。PR-1 では空のままで、
+    後続 PR で Bus / Effect / Send ノードを compile していく
+  - `Assets > Create > Nezia > Mixer Graph` メニュー
+  - `NeziaSettings` の自動生成フローを拡張: `defaultMixer` が未設定なら
+    `Assets/Settings/DefaultMixer.neziamixer` を自動生成し、自動アサイン
+  - パッケージ最低 Unity を `2022.3` → `6000.2` に bump、
+    `com.unity.graphtoolkit` を `dependencies` に追加（hard dependency）
+
 - **IP-12 PR-0a `NeziaSettings` 導入** — URP の `GraphicsSettings` 方式に倣い、
   プロジェクト全体の Nezia 既定設定を `Project Settings > Nezia` から
   アセット参照 1 本で管理できるようにした。
