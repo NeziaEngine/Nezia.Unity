@@ -306,9 +306,10 @@ namespace Nezia.Unity
         /// </summary>
         public NeziaBus ResolveOutputBus()
         {
-            if (_outputMixerAsset == null || string.IsNullOrEmpty(_outputBusName))
-                return NeziaBus.Invalid;
-            return _outputMixerAsset.Resolve(_outputBusName);
+            if (string.IsNullOrEmpty(_outputBusName)) return NeziaBus.Invalid;
+            // 明示指定 mixer が無ければ Project Settings の default mixer にフォールバックする。
+            var asset = _outputMixerAsset != null ? _outputMixerAsset : NeziaSettings.Instance?.DefaultMixer;
+            return asset != null ? asset.Resolve(_outputBusName) : NeziaBus.Invalid;
         }
 
         /// <summary>
