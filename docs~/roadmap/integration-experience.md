@@ -403,10 +403,13 @@ CustomEditor に転換した。
 
 #### IP-12 PR-C: Effect chain ペイン
 
-- 選択 Bus の右ペインに `UI Toolkit ListView` で `BusEffect` を表示
-- `+ Add Effect` メニューから kind 選択（LowPass / HighPass / Reverb / Compressor）
-- 各エフェクトはインライン展開でパラメータ編集
-- `[SerializeReference]` を活かしつつ list の順序変更で実体化順を制御
+- 選択 Bus の右ペインに Effect 行リスト
+- `+ Add` ドロップダウンメニューから kind 選択 (LowPass / HighPass / Reverb / Compressor)
+- 各 effect 行: ▲▼ 並べ替えボタン / kind ラベル / enabled トグル / × 削除
+- per-kind パラメータをインライン編集（Slider + 数値フィールド合成、isDelayed=true）
+- `[SerializeReference]` の多態シリアライズを活かしつつ、List 順序が effect 挿入順
+- 全編集 `Undo.RecordObject`、編集後 `InvalidateResolvedCache` で次回 Resolve 時に再構築
+- 右ペインを `ScrollView` でラップし、effect が増えても縦に伸ばせる
 
 #### IP-12 PR-D: Send / sidechain 編集
 
