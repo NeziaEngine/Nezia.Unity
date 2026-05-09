@@ -42,8 +42,14 @@ namespace Nezia.Unity.Editor.Mixer
         protected override void OnDefinePorts(IPortDefinitionContext context)
         {
             // 構造ポート: Parent (input / single) ↔ Output (output / multi-out)。
-            context.AddInputPort<BusFlow>(ParentPortName).Build();
-            context.AddOutputPort<BusFlow>(OutputPortName).Build();
+            //
+            // 両ポートとも typeless で宣言する (WithDataType を呼ばない)。
+            // GTK は GraphModelImp.GetPortTypesForNode でグラフ内ポートの dataType を
+            // 全部集めて <Type>Constant ノードを ItemLibrary に自動追加するため、何らかの
+            // 値型を持たせると Create メニューにダミー Constant ノードが並んでしまう。
+            // dataType == null は SupportedTypes から除外される仕様を利用して回避している。
+            context.AddInputPort(ParentPortName).Build();
+            context.AddOutputPort(OutputPortName).Build();
         }
 
         protected override void OnDefineOptions(IOptionDefinitionContext context)
