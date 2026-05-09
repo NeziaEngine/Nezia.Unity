@@ -381,6 +381,19 @@ MyMixer.neziamixer
   `Assets/Settings/DefaultMixer.neziamixer` を自動生成し、自動アサイン
 
 #### IP-12 PR-2: Bus ノード編集
+
+- `NeziaMixerBusNode : Node` — バスツリー上の 1 バスを表すノード
+  - `Parent` (input, single) ↔ `Output` (output, multi-out) の構造ポートで親子配線
+  - `Gain` (float, default 1.0) / `Muted` (bool, default false) は input port の
+    embedded value としてノード上でインライン編集
+  - `_busName` は `[SerializeField]` で構造同定キーとして保持
+- `NeziaMixerImporter.CompileGraph` を実装 — 全 `NeziaMixerBusNode` を走査し、
+  Parent ポート接続から `parent` を解決して `NeziaMixerAsset.buses` に書き出す
+- `NeziaMixerGraph.OnGraphChanged` — 空名 / 重複名 / 親子循環を validate し、
+  対象ノードに GTK のエラーマーカーを表示
+- `NeziaMixerAsset` に Editor / Importer 用 internal API
+  (`SetBusesForImporter` / `SetSendsForImporter`) を追加
+
 #### IP-12 PR-3: Effect chain 編集
 #### IP-12 PR-4: Send / sidechain 配線 + Validate
 #### IP-12 PR-5: README / docs 更新（マイグレーション不要 — パッケージ未リリース）

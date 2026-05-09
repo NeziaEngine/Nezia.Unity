@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using Unity.GraphToolkit.Editor;
 using UnityEditor.AssetImporters;
 using UnityEngine;
@@ -17,13 +19,11 @@ namespace Nezia.Unity.Editor.Mixer
     /// </para>
     ///
     /// <para>
-    /// PR-1 (本 PR) ではグラフが空なので生成される <see cref="NeziaMixerAsset"/> も
-    /// 空 (<c>buses</c> / <c>sends</c> なし)。後続 PR で Bus / Effect / Send ノードを
-    /// 追加し、ここで <see cref="NeziaMixerGraph"/> から読み出して
-    /// <see cref="NeziaMixerAsset"/> へ compile する。
+    /// PR-2 から <see cref="NeziaMixerBusNode"/> を走査してバスツリーを compile する。
+    /// Effect / Send は IP-12 PR-3 / PR-4 で順次追加。
     /// </para>
     /// </summary>
-    [ScriptedImporter(version: 1, ext: NeziaMixerGraph.AssetExtension)]
+    [ScriptedImporter(version: 2, ext: NeziaMixerGraph.AssetExtension)]
     public sealed class NeziaMixerImporter : ScriptedImporter
     {
         public override void OnImportAsset(AssetImportContext ctx)
@@ -36,20 +36,86 @@ namespace Nezia.Unity.Editor.Mixer
             asset.name = System.IO.Path.GetFileNameWithoutExtension(ctx.assetPath);
 
             if (graph != null)
-                CompileGraph(graph, asset);
+                CompileGraph(graph, asset, ctx);
 
             ctx.AddObjectToAsset("Mixer", asset);
             ctx.SetMainObject(asset);
         }
 
         /// <summary>
-        /// <see cref="NeziaMixerGraph"/> の宣言内容を <see cref="NeziaMixerAsset"/> に書き出す。
-        /// PR-1 では空グラフ前提のため no-op。後続 PR で Bus / Effect / Send ノードを
-        /// 走査して <c>buses</c> / <c>sends</c> リストを構築する。
+        /// <see cref="NeziaMixerGraph"/> 内の <see cref="NeziaMixerBusNode"/> を走査し、
+        /// <see cref="NeziaMixerAsset"/> の <c>buses</c> リストを構築する。
+        ///
+        /// <para>
+        /// 不正なグラフ（重複名 / 名前空 / 循環）も <see cref="NeziaMixerAsset"/> としては
+        /// 生成し続ける。エラーは <see cref="AssetImportContext.LogImportError"/>
+        /// で Console に通知し、グラフ側でも <see cref="NeziaMixerGraph.OnGraphChanged"/>
+        /// が同様の警告を出す。
+        /// </para>
         /// </summary>
-        private static void CompileGraph(NeziaMixerGraph graph, NeziaMixerAsset asset)
+        private static void CompileGraph(NeziaMixerGraph graph, NeziaMixerAsset asset, AssetImportContext ctx)
         {
-            // intentionally empty until PR-2.
+            var busNodes = graph.GetNodes().OfType<NeziaMixerBusNode>().ToList();
+            if (busNodes.Count == 0)
+            {
+                asset.SetBusesForImporter(new List<NeziaMixerAsset.BusNode>());
+                return;
+            }
+
+            // 重複名検出は最初に O(N) で済ませて log し、以後は最初に出現したノードを採用する。
+            var seenNames = new HashSet<string>();
+            var compiled = new List<NeziaMixerAsset.BusNode>(busNodes.Count);
+            foreach (var node in busNodes)
+            {
+                var name = node.BusName;
+                if (string.IsNullOrEmpty(name))
+                {
+                    ctx.LogImportError($"[NeziaMixerImporter] Bus node has empty name; skipping.");
+                    continue;
+                }
+                if (!seenNames.Add(name))
+                {
+                    ctx.LogImportError($"[NeziaMixerImporter] Duplicate bus name '{name}'; later occurrences are ignored.");
+                    continue;
+                }
+
+                compiled.Add(new NeziaMixerAsset.BusNode
+                {
+                    name = name,
+                    parent = ResolveParentName(node),
+                    gain = ResolveFloatPort(node, NeziaMixerBusNode.GainPortName, 1f),
+                    muted = ResolveBoolPort(node, NeziaMixerBusNode.MutedPortName, false),
+                });
+            }
+
+            asset.SetBusesForImporter(compiled);
+        }
+
+        /// <summary>
+        /// <see cref="NeziaMixerBusNode.ParentPortName"/> 入力ポートに接続されている親バスの
+        /// 名前を返す。未接続なら空文字（master 直下）。
+        /// </summary>
+        private static string ResolveParentName(NeziaMixerBusNode node)
+        {
+            var parentPort = node.GetInputPortByName(NeziaMixerBusNode.ParentPortName);
+            var source = parentPort?.firstConnectedPort;
+            if (source?.GetNode() is NeziaMixerBusNode parentBus)
+                return parentBus.BusName;
+            return string.Empty;
+        }
+
+        private static float ResolveFloatPort(NeziaMixerBusNode node, string portName, float fallback)
+        {
+            var port = node.GetInputPortByName(portName);
+            if (port == null) return fallback;
+            return port.TryGetValue<float>(out var value) ? value : fallback;
+        }
+
+        private static bool ResolveBoolPort(NeziaMixerBusNode node, string portName, bool fallback)
+        {
+            var port = node.GetInputPortByName(portName);
+            if (port == null) return fallback;
+            return port.TryGetValue<bool>(out var value) ? value : fallback;
         }
     }
 }

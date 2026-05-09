@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using Unity.GraphToolkit.Editor;
 
 namespace Nezia.Unity.Editor.Mixer
@@ -15,8 +17,8 @@ namespace Nezia.Unity.Editor.Mixer
     /// </para>
     ///
     /// <para>
-    /// PR-1 (本 PR) ではグラフは空のスケルトン。Bus / Effect / Send ノードは
-    /// 後続 PR (IP-12 PR-2 以降) で追加していく。
+    /// PR-2 からは <see cref="NeziaMixerBusNode"/> を扱う。<see cref="OnGraphChanged"/>
+    /// で重複名 / 名前空 / 親子循環を validate し、対象ノード上にエラーマーカーを表示する。
     /// </para>
     /// </summary>
     [Graph(AssetExtension), Serializable]
@@ -26,5 +28,49 @@ namespace Nezia.Unity.Editor.Mixer
         /// アセット拡張子。<c>.neziamixer</c> ファイルとしてプロジェクト内に保存される。
         /// </summary>
         public const string AssetExtension = "neziamixer";
+
+        public override void OnGraphChanged(GraphLogger logger)
+        {
+            ValidateBusNodes(logger);
+        }
+
+        private void ValidateBusNodes(GraphLogger logger)
+        {
+            var busNodes = GetNodes().OfType<NeziaMixerBusNode>().ToList();
+            if (busNodes.Count == 0) return;
+
+            // ── 名前バリデーション (空名 / 重複名)──────────────────
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var node in busNodes)
+            {
+                if (string.IsNullOrEmpty(node.BusName))
+                {
+                    logger.LogError("Bus node が空の名前を持っています。名前を設定してください。", node);
+                    continue;
+                }
+                if (!seen.Add(node.BusName))
+                    logger.LogError($"バス名 '{node.BusName}' が重複しています。名前は一意である必要があります。", node);
+            }
+
+            // ── 親子循環検出 ──────────────────────────────────────
+            //
+            // 各ノードから Parent ポート経由で親をたどり、自分自身に戻るパスがあれば循環。
+            foreach (var node in busNodes)
+            {
+                var visiting = new HashSet<NeziaMixerBusNode>();
+                var current = node;
+                while (current != null)
+                {
+                    if (!visiting.Add(current))
+                    {
+                        logger.LogError($"バス '{node.BusName}' から循環参照を検出しました。", node);
+                        break;
+                    }
+                    var parentPort = current.GetInputPortByName(NeziaMixerBusNode.ParentPortName);
+                    var source = parentPort?.firstConnectedPort;
+                    current = source?.GetNode() as NeziaMixerBusNode;
+                }
+            }
+        }
     }
 }

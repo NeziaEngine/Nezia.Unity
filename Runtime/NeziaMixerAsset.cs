@@ -182,6 +182,36 @@ namespace Nezia.Unity
         [SerializeField] private List<BusNode> buses = new();
         [SerializeField] private List<SendNode> sends = new();
 
+        // ─── Editor / Importer 用 ─────────────────────────────────
+        //
+        // .neziamixer (NeziaMixerGraph) 経由で生成される際、ScriptedImporter から
+        // バスツリーをまとめて書き換えるためのバルク API。Inspector / コードからの
+        // 直接編集は引き続き既存の SerializedObject 経路で行う。
+
+        /// <summary>
+        /// (Editor 専用) <see cref="buses"/> をバルク書き換えする。`source` の参照は
+        /// そのまま採用するため、呼び出し側は新規作成済みリストを渡すこと。
+        /// `null` を渡すと空リストになる。
+        /// </summary>
+        internal void SetBusesForImporter(List<BusNode> source)
+        {
+            buses = source ?? new List<BusNode>();
+            // Lookup / 解決キャッシュは破棄。次回 Resolve 時に再構築される。
+            _byName = null;
+            _resolved.Clear();
+            _resolvedEffects.Clear();
+            _resolvedSends = null;
+        }
+
+        /// <summary>
+        /// (Editor 専用) <see cref="sends"/> をバルク書き換えする。
+        /// </summary>
+        internal void SetSendsForImporter(List<SendNode> source)
+        {
+            sends = source ?? new List<SendNode>();
+            _resolvedSends = null;
+        }
+
         public IReadOnlyList<BusNode> Buses => buses;
         public IReadOnlyList<SendNode> Sends => sends;
 
