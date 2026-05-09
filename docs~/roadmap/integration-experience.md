@@ -350,18 +350,40 @@ Inspector の flat list より配線を一望しやすくする。
   に「明示 mixer 指定 → なければ `NeziaSettings.Instance.DefaultMixer`」の
   フォールバックを足す。既存挙動は破壊しない。
 
-#### IP-12 PR-1: Mixer Graph Window スキャフォールド
+**基盤の選定**: Unity 6.2 で公式リリースされた **Graph Toolkit
+(`com.unity.graphtoolkit`)** を採用する。これに伴い:
 
-- `Tools > Nezia > Mixer Graph Editor`（`UnityEditor.Experimental.GraphView`
-  ベース）。
-- `NeziaMixerAsset` または Project Default を target に開く。表示のみ。
-- `BusNode.editorPosition: Vector2` を追加。未配置データは親子ツリーから
-  自動レイアウト。
+- パッケージ最低 Unity を **6000.2** に bump
+- `com.unity.graphtoolkit` を hard dependency に追加
+- `UnityEditor.Experimental.GraphView` 案は破棄
 
-#### IP-12 PR-2: Bus 編集（追加・削除・属性・親変更）
+**アセット構造**: Shader Graph の `.shadergraph → .shader` パターンを踏襲する。
+
+```
+MyMixer.neziamixer
+  ├─ NeziaMixerGraph (Editor 専用 / Graph 派生・source-of-truth)
+  └─ NeziaMixerAsset (main asset / Runtime SO・ScriptedImporter が生成)
+```
+
+ユーザー視点では 1 ファイル。Runtime コードは従来どおり
+`NeziaMixerAsset` 型で参照する（拡張子のみ変わる）。Graph 編集が唯一の
+入力で、SO 側は毎回 deterministic に再生成されるため source-of-truth 問題は
+発生しない。
+
+#### IP-12 PR-1: ScriptedImporter + 最小 Graph スケルトン
+
+- `package.json` を Unity 6.2+ + GTK 依存に更新
+- `NeziaMixerGraph` (`Graph` 派生) — `[Graph("neziamixer")]` 属性付きの空グラフ
+- `NeziaMixerImporter` (`ScriptedImporter`) — `.neziamixer` から
+  `NeziaMixerAsset` SO を main asset として生成（PR-1 では空のまま）
+- `Assets > Create > Nezia > Mixer Graph` メニュー
+- `NeziaSettings` 自動生成フローを拡張: `defaultMixer` 未設定時に
+  `Assets/Settings/DefaultMixer.neziamixer` を自動生成し、自動アサイン
+
+#### IP-12 PR-2: Bus ノード編集
 #### IP-12 PR-3: Effect chain 編集
-#### IP-12 PR-4: Send / sidechain 編集 + Validate バッジ
-#### IP-12 PR-5: Inspector 起動導線・OnOpenAsset・README / 移行ガイド
+#### IP-12 PR-4: Send / sidechain 配線 + Validate
+#### IP-12 PR-5: README / docs 更新（マイグレーション不要 — パッケージ未リリース）
 
 **完了条件:**
 - 新規プロジェクトでアセットを 1 つも作らずとも「BGM/SE Bus が鳴る」状態を
