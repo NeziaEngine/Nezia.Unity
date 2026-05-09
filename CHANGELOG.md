@@ -18,7 +18,7 @@
   - 各行に `gain` / `muted` を補助表示
   - 公開 API: `NeziaMixerWindow.Open()` / `NeziaMixerWindow.Open(asset)`
   - GTK ベースのノードグラフ案 (旧 IP-12 PR-1+2) は撤回し、Wwise / FMOD /
-    Unity Audio Mixer と同じ `TreeView + ReorderableList` ハイブリッドに転換
+    Unity Audio Mixer と同じ `TreeView + UI Toolkit ListView` ハイブリッドに転換
 
 - **IP-12 PR-0a `NeziaSettings` 導入** — URP の `GraphicsSettings` 方式に倣い、
   プロジェクト全体の Nezia 既定設定を `Project Settings > Nezia` から
