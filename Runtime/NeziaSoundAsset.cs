@@ -312,60 +312,78 @@ namespace Nezia.Unity
         }
 
         /// <summary>
-        /// Spawn 直後の source に Asset 側音響デフォルト（priority / spatial / doppler / attenuation）を適用する。
+        /// Spawn 直後の source に音響パラメータ（priority / spatial / doppler / attenuation）を適用する。
         ///
         /// <para>
-        /// volume / pitch / bus / loop は <see cref="Spawn"/> の引数経路で渡し済みなので、ここでは扱わない。
+        /// 各引数は呼び出し側で「Clip 値か Source override 値か」を per-property に選択した
+        /// <em>effective 値</em>。これにより同じ FFI 列を Source-side override の混在パターンでも再利用できる。
+        /// volume / pitch / bus / loop は <see cref="Spawn"/> の引数経路で渡し済みなのでここでは扱わない。
         /// </para>
         ///
         /// <para>
         /// 戻り値は spatial=ON 時に確保された <see cref="NeziaAttenuationCurve"/>。Source の despawn 時に
-        /// <c>Destroy()</c> する責務は呼び出し側にある。spatial=OFF や curve 未設定の場合は
+        /// <c>Destroy()</c> する責務は呼び出し側。spatial=OFF や curve 未設定の場合は
         /// <see cref="NeziaAttenuationCurve.Invalid"/> を返す。
         /// </para>
         /// </summary>
-        internal unsafe NeziaAttenuationCurve ApplyDefaultsTo(
-            Nezia.Native.NeziaEngine* engine, NeziaEntityId source)
+        internal static unsafe NeziaAttenuationCurve ApplyAcousticsTo(
+            Nezia.Native.NeziaEngine* engine,
+            NeziaEntityId source,
+            int priority,
+            float spatialBlend,
+            float minDistance,
+            float maxDistance,
+            NeziaRolloffMode rolloffMode,
+            NeziaAttenuationCurveAsset attenuationCurve,
+            float dopplerLevel)
         {
             // Priority は Unity 表現 (0=最高) → ネイティブ表現 (高い値=高優先) で反転。
             var pr = LibNezia.nezia_source_set_priority(
-                engine, source, (byte)(255 - Mathf.Clamp(_priority, 0, 255)));
-            NeziaException.ThrowIfError(pr, "set source priority (clip default)");
+                engine, source, (byte)(255 - Mathf.Clamp(priority, 0, 255)));
+            NeziaException.ThrowIfError(pr, "set source priority");
 
             var liveCurve = NeziaAttenuationCurve.Invalid;
-            if (_spatialBlend > 0f)
+            if (spatialBlend > 0f)
             {
                 var r = LibNezia.nezia_source_set_spatial_params(
-                    engine, source, _rolloffMode.ToNative(), _minDistance, _maxDistance, 1f);
-                NeziaException.ThrowIfError(r, "set spatial params (clip default)");
+                    engine, source, rolloffMode.ToNative(), minDistance, maxDistance, 1f);
+                NeziaException.ThrowIfError(r, "set spatial params");
 
                 r = LibNezia.nezia_source_set_spatial_enabled(engine, source, 1);
-                NeziaException.ThrowIfError(r, "set spatial enabled (clip default)");
+                NeziaException.ThrowIfError(r, "set spatial enabled");
 
-                r = LibNezia.nezia_source_set_doppler_level(engine, source, _dopplerLevel);
-                NeziaException.ThrowIfError(r, "set source doppler level (clip default)");
+                r = LibNezia.nezia_source_set_doppler_level(engine, source, dopplerLevel);
+                NeziaException.ThrowIfError(r, "set source doppler level");
 
-                if (_attenuationCurve != null)
+                if (attenuationCurve != null)
                 {
-                    liveCurve = _attenuationCurve.ToNative();
+                    liveCurve = attenuationCurve.ToNative();
                     if (liveCurve.IsValid)
                     {
                         var cr = LibNezia.nezia_source_set_attenuation_curve(
                             engine, source, liveCurve.Id);
-                        NeziaException.ThrowIfError(cr, "set source attenuation curve (clip default)");
+                        NeziaException.ThrowIfError(cr, "set source attenuation curve");
                     }
                 }
             }
             else
             {
                 var r = LibNezia.nezia_source_set_spatial_enabled(engine, source, 0);
-                NeziaException.ThrowIfError(r, "set spatial disabled (clip default)");
+                NeziaException.ThrowIfError(r, "set spatial disabled");
             }
 
+            return liveCurve;
+        }
+
+        /// <summary>
+        /// Spawn 直後の source に Asset 側のエフェクトチェーンと Aux Send を適用する。
+        /// effects / sends は Clip 固有の設定であり、Source-side override の対象ではない。
+        /// ソース despawn 時にネイティブ側で自動解放されるため、追加するだけで管理不要。
+        /// </summary>
+        internal unsafe void ApplyEffectsAndSendsTo(
+            Nezia.Native.NeziaEngine* engine, NeziaEntityId source)
+        {
             // ── Effect chain（source-target effect_add） ─────────────
-            //
-            // source が despawn されるとネイティブ側で自動解放されるため、ここでは追加するだけで良い。
-            // 失敗 (INVALID 戻り) は silent skip：パラメータ初期化も飛ばす。
             if (_effects != null)
             {
                 for (int i = 0; i < _effects.Count; i++)
@@ -412,8 +430,21 @@ namespace Nezia.Unity
                     }
                 }
             }
+        }
 
-            return liveCurve;
+        /// <summary>
+        /// すべて Asset 側の値で <see cref="ApplyAcousticsTo"/> + <see cref="ApplyEffectsAndSendsTo"/> を実行する
+        /// 便宜メソッド。<see cref="NeziaAudioSource"/> 側で per-property override が無い場合にこれを呼ぶ。
+        /// </summary>
+        internal unsafe NeziaAttenuationCurve ApplyDefaultsTo(
+            Nezia.Native.NeziaEngine* engine, NeziaEntityId source)
+        {
+            var curve = ApplyAcousticsTo(
+                engine, source,
+                _priority, _spatialBlend, _minDistance, _maxDistance,
+                _rolloffMode, _attenuationCurve, _dopplerLevel);
+            ApplyEffectsAndSendsTo(engine, source);
+            return curve;
         }
     }
 }
