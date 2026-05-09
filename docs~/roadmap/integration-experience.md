@@ -413,11 +413,21 @@ CustomEditor に転換した。
 
 #### IP-12 PR-D: Send / sidechain 編集
 
-- Window 上部に `Buses` / `Sends` タブ切替
-- `Sends` タブ: `source` / `target` (Bus / Compressor sidechain) / `position` /
-  `gain` の `UI Toolkit ListView`
-- 不正 Send（未知バス・sidechain 先が Compressor でない等）の警告
-- 必要なら matrix view も検討（縦軸 source / 横軸 target）
+`NeziaMixerInspector` 上部に `Buses` / `Sends` のタブストリップを追加し、
+Send 配線を専用 UI で編集できる。Buses タブは PR-A〜C のバス編集 UI を
+そのまま、Sends タブは Send 行のスクロールリストを表示する。
+
+- `+ Add Send` で行を追加。各行は `source bus` / `target kind`
+  (`Bus` / `CompressorSidechain`) / `target bus` のドロップダウンに加え、
+  sidechain 時は対象バス上の **Compressor インデックス**ピッカーが現れる
+- 各 Send 行で `Position` (Pre / Post) と `Gain` (0〜4) を編集
+- 全編集 `Undo.RecordObject`、編集後 `InvalidateResolvedCache`
+- 値編集 (gain / position / source / target) では行を再生成せず Slider の
+  ドラッグ連続性を保つ。target kind / target bus 変更時のみ再構築
+- 不正 Send は既存の `NeziaMixerAsset.Validate` がフッタに警告として表示
+  （未知バス / sidechain 先が Compressor でない / source==target 等）
+- (将来検討) source × target の matrix view は規模が大きい設定でしか有用に
+  ならないため、必要が見えるまで保留
 
 #### IP-12 PR-E: ドキュメント整備
 

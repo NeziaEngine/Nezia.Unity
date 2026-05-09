@@ -21,8 +21,8 @@ namespace Nezia.Unity.Editor.Mixer
     /// <para>
     /// <b>PR-B 範囲</b>: バス追加・削除・リネーム・属性編集 (gain / muted)・親変更
     /// (drag &amp; drop)・<see cref="Undo"/> 対応・<see cref="NeziaMixerAsset.Validate"/>
-    /// 結果のフッタ表示。Effect chain は IP-12 PR-C、Send / sidechain は PR-D で
-    /// それぞれ専用ペイン / タブとして拡張する。
+    /// 結果のフッタ表示。Effect chain は IP-12 PR-C で、Send / sidechain は PR-D で
+    /// 専用タブとして追加済み。
     /// </para>
     /// </summary>
     [CustomEditor(typeof(NeziaMixerAsset))]
@@ -31,8 +31,12 @@ namespace Nezia.Unity.Editor.Mixer
         // ─── 状態 ────────────────────────────────────────────────
 
         [SerializeField] private int _selectedBusIndex = -1;
+        [SerializeField] private int _activeTabIndex;
 
         // ── UI 参照 ──
+        private TabView _tabView;
+        private Tab _busesTab;
+        private Tab _sendsTab;
         private TreeView _treeView;
         private VisualElement _inspectorRoot;
         private Label _inspectorPlaceholder;
@@ -43,6 +47,7 @@ namespace Nezia.Unity.Editor.Mixer
         private Button _deleteBusButton;
         private Label _inspectorTitle;
         private VisualElement _effectsRoot;
+        private VisualElement _sendsListRoot;
         private VisualElement _validationFooter;
 
         private bool _suspendBindCallbacks;
@@ -73,6 +78,7 @@ namespace Nezia.Unity.Editor.Mixer
         {
             RefreshTree();
             UpdateRightPane();
+            RefreshSendsList();
             UpdateValidationFooter();
         }
 
@@ -101,16 +107,14 @@ namespace Nezia.Unity.Editor.Mixer
             root.style.flexShrink = 0f;
             BindRootHeightToInspectorWindow(root);
 
-            BuildToolbar(root);
-            BuildTreePane(root);
-            BuildPaneSeparator(root);
-            BuildInspectorPane(root);
+            BuildTabs(root);
             BuildValidationFooter(root);
 
             // delayCall は Inspector のライフサイクルと相性が悪い (再構築毎に古い
             // callback が残る) ため、即時で初期描画する。
             RefreshTree();
             UpdateRightPane();
+            RefreshSendsList();
             UpdateValidationFooter();
 
             return root;
@@ -176,6 +180,37 @@ namespace Nezia.Unity.Editor.Mixer
                 boundPanelRoot = null;
                 onGeo = null;
             });
+        }
+
+        // ─── タブ (UI Toolkit TabView) ────────────────────────────
+
+        private void BuildTabs(VisualElement root)
+        {
+            _tabView = new TabView();
+            _tabView.style.flexGrow = 1f;
+            _tabView.style.flexShrink = 1f;
+
+            _busesTab = new Tab("Buses");
+            // Tab の中身 (contentContainer) に既存のバス編集 UI を積む。
+            BuildToolbar(_busesTab);
+            BuildTreePane(_busesTab);
+            BuildPaneSeparator(_busesTab);
+            BuildInspectorPane(_busesTab);
+            _tabView.Add(_busesTab);
+
+            _sendsTab = new Tab("Sends");
+            BuildSendsPane(_sendsTab);
+            _tabView.Add(_sendsTab);
+
+            // 選択状態の永続化。
+            _tabView.selectedTabIndex = Mathf.Clamp(_activeTabIndex, 0, 1);
+            _tabView.activeTabChanged += (_, current) =>
+            {
+                _activeTabIndex = _tabView.selectedTabIndex;
+                if (current == _sendsTab) RefreshSendsList();
+            };
+
+            root.Add(_tabView);
         }
 
         private void BuildToolbar(VisualElement root)
@@ -313,6 +348,277 @@ namespace Nezia.Unity.Editor.Mixer
 
             BuildEffectsSection(_inspectorRoot);
         }
+
+        // ─── Sends タブ (IP-12 PR-D) ─────────────────────────────
+
+        private void BuildSendsPane(VisualElement parent)
+        {
+            // ヘッダ (＋ Add Send) は固定、リストは ScrollView で内側スクロール。
+            var header = new VisualElement
+            {
+                style =
+                {
+                    flexDirection = FlexDirection.Row,
+                    alignItems = Align.Center,
+                    flexShrink = 0f,
+                    paddingTop = 6f,
+                    paddingLeft = 10f,
+                    paddingRight = 10f,
+                    paddingBottom = 4f,
+                },
+            };
+            var title = new Label("Sends");
+            title.style.unityFontStyleAndWeight = FontStyle.Bold;
+            title.style.fontSize = 13f;
+            title.style.flexGrow = 1f;
+            header.Add(title);
+
+            var addBtn = new Button(AddSend) { text = "+ Add Send" };
+            addBtn.tooltip = "Send 配線を追加します。source / target は追加後に編集してください。";
+            header.Add(addBtn);
+            parent.Add(header);
+
+            var scroll = new ScrollView(ScrollViewMode.Vertical);
+            scroll.style.flexGrow = 1f;
+            scroll.style.flexShrink = 1f;
+            var content = scroll.contentContainer;
+            content.style.flexGrow = 1f;
+            content.style.paddingLeft = 10f;
+            content.style.paddingRight = 10f;
+            content.style.paddingBottom = 6f;
+            parent.Add(scroll);
+
+            _sendsListRoot = new VisualElement();
+            _sendsListRoot.style.flexShrink = 0f;
+            scroll.Add(_sendsListRoot);
+        }
+
+        private void RefreshSendsList()
+        {
+            if (_sendsListRoot == null) return;
+            _sendsListRoot.Clear();
+
+            var asset = Asset;
+            if (asset == null) return;
+            var sends = asset.Sends;
+            if (sends == null || sends.Count == 0)
+            {
+                var empty = new Label("No sends. Click + Add Send to wire one.");
+                empty.style.color = new Color(0.6f, 0.6f, 0.6f);
+                empty.style.marginTop = 4f;
+                _sendsListRoot.Add(empty);
+                return;
+            }
+
+            var busNames = asset.Buses
+                .Where(b => b != null && !string.IsNullOrEmpty(b.name))
+                .Select(b => b.name)
+                .ToList();
+
+            for (int i = 0; i < sends.Count; i++)
+            {
+                _sendsListRoot.Add(BuildSendRow(asset, sends[i], i, busNames));
+            }
+        }
+
+        private VisualElement BuildSendRow(NeziaMixerAsset asset, NeziaMixerAsset.SendNode send, int index, List<string> busNames)
+        {
+            var row = new VisualElement();
+            row.style.marginTop = 4f;
+            row.style.borderTopWidth = 1f;
+            row.style.borderBottomWidth = 1f;
+            row.style.borderLeftWidth = 1f;
+            row.style.borderRightWidth = 1f;
+            var border = new Color(0f, 0f, 0f, 0.25f);
+            row.style.borderTopColor = row.style.borderBottomColor = border;
+            row.style.borderLeftColor = row.style.borderRightColor = border;
+            row.style.paddingTop = 4f;
+            row.style.paddingBottom = 4f;
+            row.style.paddingLeft = 6f;
+            row.style.paddingRight = 6f;
+
+            // ── 行 1: source → target kind / target bus  [×]
+            var line1 = new VisualElement
+            {
+                style = { flexDirection = FlexDirection.Row, alignItems = Align.Center, marginBottom = 4f },
+            };
+
+            var sourceField = MakeBusDropdown(busNames, send.source, v =>
+            {
+                Undo.RecordObject(asset, "Edit Send Source");
+                send.source = v;
+                ApplySendValueChange();
+            });
+            sourceField.style.flexGrow = 1f;
+            line1.Add(sourceField);
+
+            var arrow = new Label("→") { style = { marginLeft = 4f, marginRight = 4f } };
+            line1.Add(arrow);
+
+            var targetKindField = new EnumField(send.target);
+            targetKindField.style.width = 130f;
+            targetKindField.RegisterValueChangedCallback(evt =>
+            {
+                Undo.RecordObject(asset, "Edit Send Target Kind");
+                send.target = (NeziaMixerAsset.SendTargetKind)evt.newValue;
+                // sidechain picker の表示/非表示が変わるため行を再構築する。
+                ApplySendStructuralChange();
+            });
+            line1.Add(targetKindField);
+
+            var targetBusField = MakeBusDropdown(busNames, send.targetBus, v =>
+            {
+                Undo.RecordObject(asset, "Edit Send Target Bus");
+                send.targetBus = v;
+                // sidechain 時は Compressor 一覧が変わるので再構築。Bus 時は不要だが
+                // 区別を付けると分岐が増えるので一律で再構築 (リスト規模が小さく問題ない)。
+                ApplySendStructuralChange();
+            });
+            targetBusField.style.flexGrow = 1f;
+            targetBusField.style.marginLeft = 4f;
+            line1.Add(targetBusField);
+
+            var removeBtn = new Button(() => RemoveSend(index)) { text = "×" };
+            removeBtn.style.width = 24f;
+            removeBtn.style.marginLeft = 4f;
+            line1.Add(removeBtn);
+
+            row.Add(line1);
+
+            // ── 行 2: (sidechain 時のみ) target effect index ──
+            if (send.target == NeziaMixerAsset.SendTargetKind.CompressorSidechain)
+            {
+                var effectChoices = BuildCompressorChoices(asset, send.targetBus);
+                if (effectChoices.Count == 0)
+                {
+                    var note = new Label("対象バスに Compressor がありません。Buses タブで追加してください。");
+                    note.style.color = new Color(0.95f, 0.7f, 0.2f);
+                    note.style.whiteSpace = WhiteSpace.Normal;
+                    note.style.marginBottom = 4f;
+                    row.Add(note);
+                }
+                else
+                {
+                    var current = effectChoices.FirstOrDefault(c => c.index == send.targetEffectIndex);
+                    var defaultLabel = current.label ?? effectChoices[0].label;
+                    var labels = effectChoices.Select(c => c.label).ToList();
+                    var picker = new DropdownField("Sidechain Target", labels, defaultLabel);
+                    picker.RegisterValueChangedCallback(evt =>
+                    {
+                        var hit = effectChoices.FirstOrDefault(c => c.label == evt.newValue);
+                        Undo.RecordObject(asset, "Edit Sidechain Target");
+                        send.targetEffectIndex = hit.index;
+                        ApplySendValueChange();
+                    });
+                    row.Add(picker);
+                }
+            }
+
+            // ── 行 3: Position / Gain ──
+            var posField = new EnumField("Position", send.position);
+            posField.RegisterValueChangedCallback(evt =>
+            {
+                Undo.RecordObject(asset, "Edit Send Position");
+                send.position = (NeziaSendPosition)evt.newValue;
+                ApplySendValueChange();
+            });
+            row.Add(posField);
+
+            row.Add(MakeBoundFloatSlider("Gain", 0f, 4f, send.gain,
+                v => { Undo.RecordObject(asset, "Edit Send Gain"); send.gain = v; ApplySendValueChange(); }));
+
+            return row;
+        }
+
+        /// <summary>
+        /// バス名 (空文字を含む) のドロップダウンを作成する。空白行は「(未設定)」として
+        /// 表示し、選択されると空文字を commit する。
+        /// </summary>
+        private static DropdownField MakeBusDropdown(List<string> busNames, string current, System.Action<string> commit)
+        {
+            const string Unset = "(未設定)";
+            var labels = new List<string> { Unset };
+            labels.AddRange(busNames);
+            var initial = string.IsNullOrEmpty(current) || !busNames.Contains(current) ? Unset : current;
+            var dd = new DropdownField(labels, initial);
+            dd.RegisterValueChangedCallback(evt =>
+            {
+                commit(evt.newValue == Unset ? string.Empty : evt.newValue);
+            });
+            return dd;
+        }
+
+        private static List<(int index, string label)> BuildCompressorChoices(NeziaMixerAsset asset, string busName)
+        {
+            var result = new List<(int, string)>();
+            if (asset == null || string.IsNullOrEmpty(busName)) return result;
+            var bus = asset.Buses.FirstOrDefault(b => b != null && b.name == busName);
+            if (bus?.effects == null) return result;
+            for (int i = 0; i < bus.effects.Count; i++)
+            {
+                if (bus.effects[i] is NeziaMixerAsset.Compressor)
+                    result.Add((i, $"[{i}] Compressor"));
+            }
+            return result;
+        }
+
+        private void AddSend()
+        {
+            var asset = Asset;
+            if (asset == null) return;
+            Undo.RecordObject(asset, "Add Send");
+            var sends = GetSendListAccessor();
+            sends.Add(new NeziaMixerAsset.SendNode
+            {
+                source = string.Empty,
+                target = NeziaMixerAsset.SendTargetKind.Bus,
+                targetBus = string.Empty,
+                targetEffectIndex = 0,
+                position = NeziaSendPosition.Post,
+                gain = 1f,
+            });
+            ApplySendStructuralChange();
+        }
+
+        private void RemoveSend(int index)
+        {
+            var asset = Asset;
+            if (asset == null) return;
+            var sends = GetSendListAccessor();
+            if (index < 0 || index >= sends.Count) return;
+            Undo.RecordObject(asset, "Remove Send");
+            sends.RemoveAt(index);
+            ApplySendStructuralChange();
+        }
+
+        /// <summary>
+        /// Send リストの構造 (件数 / 行レイアウト) が変わる編集の仕上げ。
+        /// 行を再構築するため、ドラッグ中の Slider 等にはこちらを使わない。
+        /// </summary>
+        private void ApplySendStructuralChange()
+        {
+            var asset = Asset;
+            if (asset == null) return;
+            asset.InvalidateResolvedCache();
+            EditorUtility.SetDirty(asset);
+            RefreshSendsList();
+            UpdateValidationFooter();
+        }
+
+        /// <summary>
+        /// 値編集 (gain / position / source / target) のみで行レイアウトを保つ仕上げ。
+        /// Slider を再生成しないので、ドラッグ操作の連続性が維持される。
+        /// </summary>
+        private void ApplySendValueChange()
+        {
+            var asset = Asset;
+            if (asset == null) return;
+            asset.InvalidateResolvedCache();
+            EditorUtility.SetDirty(asset);
+            UpdateValidationFooter();
+        }
+
+        private List<NeziaMixerAsset.SendNode> GetSendListAccessor() => Asset?.EditableSends;
 
         // ─── Effects (IP-12 PR-C) ────────────────────────────────
 

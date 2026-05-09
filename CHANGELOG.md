@@ -9,6 +9,18 @@
 
 ### Added
 
+- **IP-12 PR-D Send / sidechain タブ** — `NeziaMixerInspector` 上部に
+  `Buses` / `Sends` のタブストリップを追加し、Send 配線を専用 UI で編集できる
+  ようにした。
+  - **`+ Add Send`** で Send 行を追加。各行は **source bus** / **target kind**
+    (`Bus` / `CompressorSidechain`) / **target bus** のドロップダウンに加え、
+    sidechain 時は対象バス上の **Compressor インデックス**ピッカーが現れる
+  - 各 Send 行で **Position** (Pre / Post) と **Gain** (0〜4) を編集
+  - 全編集 `Undo.RecordObject` 経由。値編集 (gain / position 等) では行を
+    再生成しないため、Slider のドラッグ操作中もフォーカスが切れない
+  - 不正 Send (未知バス・sidechain 先が Compressor でない等) は既存の
+    `NeziaMixerAsset.Validate` がフッタに警告として表示
+
 - **IP-12 PR-C Effect chain ペイン** — `NeziaMixerInspector` の右ペインに
   選択中バスの Effect chain 編集 UI を追加。
   - **`+ Add` ドロップダウン** で `LowPass` / `HighPass` / `Reverb` / `Compressor`
