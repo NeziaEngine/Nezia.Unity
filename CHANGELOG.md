@@ -9,14 +9,33 @@
 
 ### Added
 
-- **IP-12 PR-A `NeziaMixerWindow` スキャフォールド** — `Tools > Nezia >
-  Mixer Editor` で開く専用 EditorWindow を追加（表示のみ・編集は PR-B）。
-  - UI Toolkit `TreeView` でバスツリーを階層表示。仮想 `Master` ルートを
-    最上位に置き、`parent` が空 / 未知のバスを直下に並べる
-  - 上部 `ObjectField` で編集対象 `NeziaMixerAsset` を切替。アセット未指定時は
-    `NeziaSettings.Instance.DefaultMixer` を自動ロード
-  - 各行に `gain` / `muted` を補助表示
-  - 公開 API: `NeziaMixerWindow.Open()` / `NeziaMixerWindow.Open(asset)`
+- **IP-12 PR-A / PR-B `NeziaMixerInspector` (Custom Inspector)** —
+  `NeziaMixerAsset` を Project ビューで選択するか `Project Settings > Nezia` の
+  inline Inspector から、専用 UI でバスツリーを編集できるようになった。
+  当初 `EditorWindow` (`NeziaMixerWindow`) として実装したが、ツリー + プロパティ
+  編集は CustomEditor として Inspector に乗せる方が Unity-idiomatic（Animator や
+  Audio Mixer 等の専用ウィンドウは「特殊な可視化」が必要なケース向け）なので、
+  PR-B のレビュー過程で **`CustomEditor(typeof(NeziaMixerAsset))` に転換**。
+  すべて UI Toolkit 実装。
+  - 2 ペイン構成 (`TwoPaneSplitView`): 左 = TreeView / 右 = 選択バスの Inspector
+  - **`+ Add Bus` / `− Delete`** ボタン
+    - `Add` は選択中バスと同じ階層に兄弟として追加 (Wwise / FMOD 流)。名前は
+      `New Bus` 〜 `New Bus (N)` で自動的に重複回避
+    - `Delete` は選択バスを削除。子バスは削除対象の親に昇格 (カスケード削除しない)
+  - 右ペインに **Name** / **Gain (Slider + FloatField)** / **Muted**
+    - 入力中の二重 commit を避けるため `Name` / `Gain` 数値は `isDelayed = true`
+    - 空文字への rename は拒否し UI を旧名に戻す（親子参照が壊れるため）
+    - リネーム時、子バスの `parent` 参照も自動的に新名へ追従
+  - **Drag &amp; drop で親変更** — TreeView 上でバスをドラッグ → 別バスや Master 配下に
+    ドロップ可。自分自身 / 自分の子孫へのドロップは循環防止のため reject
+  - 全編集が `Undo.RecordObject` 経由 (Ctrl+Z 対応)、`Undo` / `Redo` 後は UI 自動リフレッシュ
+  - 仮想 Master ルートを単一 root として表示。TreeView の id 衝突回避のため、
+    Master = 1 / 実バス `i` = `i + 2` のオフセット採番
+  - 空名 bus は `(unnamed)` を橙字で tree に表示し、選択して名前を直せるようにする
+  - フッタに `NeziaMixerAsset.Validate()` の結果（重複名 / 未知 parent / 循環など）を
+    リアルタイム表示
+  - `NeziaMixerAsset` に Editor 専用 internal API を追加: `EditableBuses` /
+    `EditableSends` / `InvalidateResolvedCache`
   - GTK ベースのノードグラフ案 (旧 IP-12 PR-1+2) は撤回し、Wwise / FMOD /
     Unity Audio Mixer と同じ `TreeView + UI Toolkit ListView` ハイブリッドに転換
 
