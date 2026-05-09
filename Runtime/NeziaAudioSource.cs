@@ -627,8 +627,13 @@ namespace Nezia.Unity
         private void Start()
         {
             // MixerAsset 優先、未設定 / 未解決なら BusMap に fallback。
-            if (!outputBus.IsValid && _mixerAsset != null && !string.IsNullOrEmpty(_outputBusName))
-                outputBus = _mixerAsset.Resolve(_outputBusName);
+            // _mixerAsset が未指定でも _outputBusName が入っていれば Project Settings の
+            // default mixer を試す（NeziaSettings 経由）。
+            if (!outputBus.IsValid && !string.IsNullOrEmpty(_outputBusName))
+            {
+                var asset = _mixerAsset != null ? _mixerAsset : NeziaSettings.Instance?.DefaultMixer;
+                if (asset != null) outputBus = asset.Resolve(_outputBusName);
+            }
             if (_busMap != null && _outputAudioMixerGroup != null && !outputBus.IsValid)
                 outputBus = _busMap.Resolve(_outputAudioMixerGroup);
 

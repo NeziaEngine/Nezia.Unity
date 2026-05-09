@@ -9,6 +9,26 @@
 
 ### Added
 
+- **IP-12 PR-0a `NeziaSettings` 導入** — URP の `GraphicsSettings` 方式に倣い、
+  プロジェクト全体の Nezia 既定設定を `Project Settings > Nezia` から
+  アセット参照 1 本で管理できるようにした。
+  - `NeziaSettings : ScriptableObject`（Runtime）— `defaultMixer:
+    NeziaMixerAsset` を持つ singleton SO。`NeziaSettings.Instance` でランタイム
+    取得（Editor は `EditorBuildSettings.TryGetConfigObject` 経由、ビルドでは
+    PlayerSettings の preloaded assets として自動ロード）
+  - `Project Settings > Nezia` ページ（`NeziaSettingsProvider`）— Settings Asset
+    の ObjectField + `Create New...` + 選択中アセットの inline Inspector。
+    アセット指定時に `EditorBuildSettings.AddConfigObject` と PlayerSettings
+    preloaded assets への登録を自動で行う
+  - パッケージ導入時 / Editor 起動時に `Assets/Settings/NeziaSettings.asset`
+    を自動生成し、`EditorBuildSettings` と PlayerSettings preloaded assets に
+    登録する（`[InitializeOnLoadMethod]`）。プロジェクト内に既に
+    `NeziaSettings` が存在する場合はそれを採用するため重複作成されない
+  - `NeziaSoundAsset.ResolveOutputBus` / `NeziaAudioSource.Start` の解決順に
+    「明示 mixer 指定 → なければ `NeziaSettings.Instance.DefaultMixer`」
+    フォールバックを追加。既存挙動は破壊しない（明示 mixer がある場合の動作は
+    従来どおり）
+
 - **IP-4 Clip-centric authoring**（PR-A〜C2）— 「鳴り方は Clip が決め、
   Source は『いつ・どこで』だけ」という Wwise / FMOD 流の authoring モデルへ
   転換。詳細は [`docs~/migration/clip-centric.md`](docs~/migration/clip-centric.md)。

@@ -315,6 +315,61 @@ EditorWindow で IP-1 のアセットや実行中の状態を可視化。
 
 優先度は低いがデバッグ効率に直結する。
 
+### IP-12. Project-level Mixer + Graph Editor
+
+URP の `GraphicsSettings.defaultRenderPipeline` 方式に倣い、プロジェクト全体の
+グローバル Bus 構成を `Project Settings > Nezia` から **アセット参照1本** で
+管理する。あわせてバスツリーをノードグラフで編集する EditorWindow を導入し、
+Inspector の flat list より配線を一望しやすくする。
+
+**位置付け:**
+- 既存 `NeziaMixerAsset`（IP-1）はそのまま実体として再利用。シリアライズ
+  形式は変えない（破壊的変更なし）。
+- 「アクティブなミキサー構成は同時に 1 つ」という Wwise / FMOD 慣習を
+  仕様レベルで明文化する。複数 Asset は override / プラットフォーム差し替え
+  用の派生として残す。
+
+#### IP-12 PR-0a: `NeziaSettings` 導入（Project Settings 連携）
+
+- `NeziaSettings : ScriptableObject`（`Runtime/`）— `defaultMixer:
+  NeziaMixerAsset` を 1 フィールドだけ持つ singleton SO。将来の global 設定の
+  受け皿でもある。
+- `Project Settings > Nezia` ページ（`Editor/NeziaSettingsProvider`）— URP の
+  Graphics ページと同じ作り。`Settings Asset:` の ObjectField + `Create New` +
+  inline Inspector。
+- 参照保持は `EditorBuildSettings.AddConfigObject(GUID, asset, overwrite:true)`
+  方式で `ProjectSettings/EditorBuildSettings.asset` に GUID 1 本を持つ。
+  実体 SO は `Assets/` 配下なので通常のバージョン管理に乗る。
+- 登録時に PlayerSettings の preloaded assets に追加 → ランタイムは
+  `NeziaSettings.Instance` で取得（`Resources` 不要）。
+- **自動生成**: パッケージ導入後の Editor 起動時に `Assets/Settings/NeziaSettings.asset`
+  を自動生成し、`EditorBuildSettings` と preloaded assets へ登録する
+  （`[InitializeOnLoadMethod]`）。ユーザーは Project Settings ページを開かずとも
+  既定状態で動く。プロジェクト内に既存 `NeziaSettings` が見つかれば再利用。
+- 解決順統合: `NeziaSoundAsset.ResolveOutputBus()` と `NeziaAudioSource.Start()`
+  に「明示 mixer 指定 → なければ `NeziaSettings.Instance.DefaultMixer`」の
+  フォールバックを足す。既存挙動は破壊しない。
+
+#### IP-12 PR-1: Mixer Graph Window スキャフォールド
+
+- `Tools > Nezia > Mixer Graph Editor`（`UnityEditor.Experimental.GraphView`
+  ベース）。
+- `NeziaMixerAsset` または Project Default を target に開く。表示のみ。
+- `BusNode.editorPosition: Vector2` を追加。未配置データは親子ツリーから
+  自動レイアウト。
+
+#### IP-12 PR-2: Bus 編集（追加・削除・属性・親変更）
+#### IP-12 PR-3: Effect chain 編集
+#### IP-12 PR-4: Send / sidechain 編集 + Validate バッジ
+#### IP-12 PR-5: Inspector 起動導線・OnOpenAsset・README / 移行ガイド
+
+**完了条件:**
+- 新規プロジェクトでアセットを 1 つも作らずとも「BGM/SE Bus が鳴る」状態を
+  Project Settings 1 ページのセットアップで作れる
+- バスツリーの追加・配線・Send 設定がノードグラフ上で完結する
+
+---
+
 ### IP-11. その他軽微
 
 - `NeziaAudioListener` の velocity 平滑化係数 / Doppler 上限の Inspector 化
