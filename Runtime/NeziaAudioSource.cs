@@ -47,6 +47,18 @@ namespace Nezia.Unity
         [SerializeField] private NeziaMixerAsset _mixerAsset;
         [SerializeField] private string _outputBusName;
 
+        // IP-4 (Clip-centric authoring): true のとき音響設定を sound asset 側に委譲する。
+        // - volume / pitch は Clip 値への乗算 (scale) として動く
+        // - loop は Source または Clip のいずれかが true なら有効
+        // - outputBus は Source 側未設定なら Clip の `OutputMixerAsset`/`OutputBusName` を解決
+        // - spatial / attenuation / doppler / priority は Clip の `ApplyDefaultsTo` が一括適用
+        // 既存プレハブでの破壊的変更を避けるため既定は false。新規 NeziaAudioSource では
+        // 推奨値 true。マイグレーションコマンドは PR-C で提供予定。
+        [SerializeField,
+         Tooltip("ON: 音響設定を Clip (NeziaSoundAsset) に委譲し、Source.volume/pitch は scale として効く。" +
+                 "OFF (互換モード): Source 側の値が直接最終値になる従来挙動。")]
+        private bool _useClipDefaults;
+
         // ─── ランタイム状態 ──────────────────────────────────────
 
         // ネイティブ側の INVALID は { index: u32::MAX, generation: 0 }。
@@ -101,7 +113,32 @@ namespace Nezia.Unity
         // 内部用: 現在 dispatch 対象のアセットを返す。`_sound` が優先で、未設定なら旧 `_clip`。
         private NeziaSoundAsset ResolvedSound => _sound != null ? _sound : _clip;
 
-        /// <summary>音量 (0.0〜1.0)。<c>AudioSource.volume</c> 互換。</summary>
+        /// <summary>
+        /// Clip-centric モード切替。<c>true</c> なら音響設定を sound asset に委譲する。
+        /// 既定 <c>false</c>（後方互換）。新規セットアップでは <c>true</c> 推奨。
+        /// </summary>
+        public bool useClipDefaults { get => _useClipDefaults; set => _useClipDefaults = value; }
+
+        // Clip 由来の volume / pitch を取得するヘルパ。useClipDefaults=false や asset 未設定なら 1。
+        private float ClipVolume()
+        {
+            if (!_useClipDefaults) return 1f;
+            var s = ResolvedSound;
+            return s != null ? s.Volume : 1f;
+        }
+
+        private float ClipPitch()
+        {
+            if (!_useClipDefaults) return 1f;
+            var s = ResolvedSound;
+            return s != null ? s.Pitch : 1f;
+        }
+
+        /// <summary>
+        /// 音量 (0.0〜1.0)。<c>AudioSource.volume</c> 互換。
+        /// <see cref="useClipDefaults"/> が ON のときは Clip 基準音量への乗算 (scale) として
+        /// ネイティブへ渡す（最終ゲイン = Clip.Volume × this.volume）。
+        /// </summary>
         public unsafe float volume
         {
             get => _volume;
@@ -110,14 +147,18 @@ namespace Nezia.Unity
                 _volume = Mathf.Clamp01(value);
                 if (HasLiveSource)
                 {
+                    var final = (_mute ? 0f : _volume) * ClipVolume();
                     var r = LibNezia.nezia_source_set_volume(
-                        NeziaEngine.RequireHandle(), _spawnedSource, _mute ? 0f : _volume);
+                        NeziaEngine.RequireHandle(), _spawnedSource, final);
                     NeziaException.ThrowIfError(r, "set source volume");
                 }
             }
         }
 
-        /// <summary>ピッチ。<c>AudioSource.pitch</c> 互換。</summary>
+        /// <summary>
+        /// ピッチ。<c>AudioSource.pitch</c> 互換。
+        /// <see cref="useClipDefaults"/> が ON のときは Clip 基準ピッチへの乗算 (scale)。
+        /// </summary>
         public unsafe float pitch
         {
             get => _pitch;
@@ -127,7 +168,7 @@ namespace Nezia.Unity
                 if (HasLiveSource)
                 {
                     var r = LibNezia.nezia_source_set_pitch(
-                        NeziaEngine.RequireHandle(), _spawnedSource, _pitch);
+                        NeziaEngine.RequireHandle(), _spawnedSource, _pitch * ClipPitch());
                     NeziaException.ThrowIfError(r, "set source pitch");
                 }
             }
@@ -158,8 +199,9 @@ namespace Nezia.Unity
                 _mute = value;
                 if (HasLiveSource)
                 {
+                    var final = (_mute ? 0f : _volume) * ClipVolume();
                     var r = LibNezia.nezia_source_set_volume(
-                        NeziaEngine.RequireHandle(), _spawnedSource, _mute ? 0f : _volume);
+                        NeziaEngine.RequireHandle(), _spawnedSource, final);
                     NeziaException.ThrowIfError(r, "set source volume (mute)");
                 }
             }
@@ -334,22 +376,47 @@ namespace Nezia.Unity
             if (HasLiveSource) StopInternal();
 
             var engine = NeziaEngine.RequireHandle();
-            var effectiveVolume = _mute ? 0f : _volume;
-            var busId = outputBus.IsValid ? outputBus.Id : LibNezia.nezia_engine_master_bus(engine);
+
+            // ── volume / pitch / loop / bus を Clip-side 既定と合成 ──────────
+            //
+            // useClipDefaults=true: Source の volume/pitch は Clip 基準値への scale。
+            //   loop は Source または Clip の論理和（Source.loop=true なら強制ループ可）。
+            //   bus は Source 側設定が優先、未設定なら Clip の outputBus、最後に Master。
+            // useClipDefaults=false (legacy): Source の値がそのまま最終値。
+            float clipV = _useClipDefaults ? asset.Volume : 1f;
+            float clipP = _useClipDefaults ? asset.Pitch : 1f;
+            bool effectiveLoop = _useClipDefaults ? (_loop || asset.Loop) : _loop;
+            float effectiveVolume = (_mute ? 0f : _volume) * clipV;
+            float effectivePitch = _pitch * clipP;
+
+            NeziaEntityId busId;
+            if (outputBus.IsValid)
+            {
+                busId = outputBus.Id;
+            }
+            else if (_useClipDefaults)
+            {
+                var clipBus = asset.ResolveOutputBus();
+                busId = clipBus.IsValid ? clipBus.Id : LibNezia.nezia_engine_master_bus(engine);
+            }
+            else
+            {
+                busId = LibNezia.nezia_engine_master_bus(engine);
+            }
 
             // 自然終了をネイティブから受け取るためのコールバック登録。
             // looping のときは終了通知が発火しないので、コールバック登録自体を省略してよい。
             // Container 経路は FFI が callback 未対応なので登録しない。
             delegate* unmanaged[Cdecl]<void*, void> cb = null;
             void* userData = null;
-            if (!_loop && asset.SupportsFinishCallback)
+            if (!effectiveLoop && asset.SupportsFinishCallback)
             {
                 _selfHandle = GCHandle.Alloc(this, GCHandleType.Weak);
                 userData = (void*)GCHandle.ToIntPtr(_selfHandle);
                 cb = (delegate* unmanaged[Cdecl]<void*, void>)s_finishCallbackPtr;
             }
 
-            var src = asset.Spawn(engine, effectiveVolume, _pitch, busId, _loop, cb, userData);
+            var src = asset.Spawn(engine, effectiveVolume, effectivePitch, busId, effectiveLoop, cb, userData);
             if (src.index == uint.MaxValue)
             {
                 FreeSelfHandle();
@@ -361,39 +428,50 @@ namespace Nezia.Unity
             _isPaused = false;
             _hasPrevPosition = false;
 
-            var prResult = LibNezia.nezia_source_set_priority(
-                engine, src, ToNativePriority(_priority));
-            NeziaException.ThrowIfError(prResult, "set source priority");
-
-            if (_spatialBlend > 0f)
+            if (_useClipDefaults)
             {
-                var r = LibNezia.nezia_source_set_spatial_params(
-                    engine, src, _rolloffMode.ToNative(), _minDistance, _maxDistance, 1f);
-                NeziaException.ThrowIfError(r, "set spatial params");
-
-                r = LibNezia.nezia_source_set_spatial_enabled(engine, src, 1);
-                NeziaException.ThrowIfError(r, "set spatial enabled");
-
-                r = LibNezia.nezia_source_set_doppler_level(engine, src, _dopplerLevel);
-                NeziaException.ThrowIfError(r, "set source doppler level");
-
-                if (_attenuationCurve != null)
-                {
-                    _liveAttenuationCurve = _attenuationCurve.ToNative();
-                    if (_liveAttenuationCurve.IsValid)
-                    {
-                        var cr = LibNezia.nezia_source_set_attenuation_curve(
-                            engine, src, _liveAttenuationCurve.Id);
-                        NeziaException.ThrowIfError(cr, "set source attenuation curve");
-                    }
-                }
-
-                PushPosition();
+                // Clip 側に spatial / doppler / priority / attenuation を委譲する。
+                // 戻り値の AttenuationCurve は despawn 時に Destroy する責務をここで引き取る。
+                _liveAttenuationCurve = asset.ApplyDefaultsTo(engine, src);
+                if (asset.SpatialBlend > 0f) PushPosition();
             }
             else
             {
-                var r = LibNezia.nezia_source_set_spatial_enabled(engine, src, 0);
-                NeziaException.ThrowIfError(r, "set spatial disabled");
+                // 互換モード: Source 側の値で priority / spatial を設定する従来挙動。
+                var prResult = LibNezia.nezia_source_set_priority(
+                    engine, src, ToNativePriority(_priority));
+                NeziaException.ThrowIfError(prResult, "set source priority");
+
+                if (_spatialBlend > 0f)
+                {
+                    var r = LibNezia.nezia_source_set_spatial_params(
+                        engine, src, _rolloffMode.ToNative(), _minDistance, _maxDistance, 1f);
+                    NeziaException.ThrowIfError(r, "set spatial params");
+
+                    r = LibNezia.nezia_source_set_spatial_enabled(engine, src, 1);
+                    NeziaException.ThrowIfError(r, "set spatial enabled");
+
+                    r = LibNezia.nezia_source_set_doppler_level(engine, src, _dopplerLevel);
+                    NeziaException.ThrowIfError(r, "set source doppler level");
+
+                    if (_attenuationCurve != null)
+                    {
+                        _liveAttenuationCurve = _attenuationCurve.ToNative();
+                        if (_liveAttenuationCurve.IsValid)
+                        {
+                            var cr = LibNezia.nezia_source_set_attenuation_curve(
+                                engine, src, _liveAttenuationCurve.Id);
+                            NeziaException.ThrowIfError(cr, "set source attenuation curve");
+                        }
+                    }
+
+                    PushPosition();
+                }
+                else
+                {
+                    var r = LibNezia.nezia_source_set_spatial_enabled(engine, src, 0);
+                    NeziaException.ThrowIfError(r, "set spatial disabled");
+                }
             }
         }
 
@@ -500,7 +578,13 @@ namespace Nezia.Unity
 
         private void LateUpdate()
         {
-            if (_isPlaying && !_isPaused && _spatialBlend > 0f) PushPositionAndVelocity();
+            if (!_isPlaying || _isPaused) return;
+            // useClipDefaults=true のときは Clip 側 spatial 設定をトリガに使う。
+            // false のときは従来どおり Source 側 _spatialBlend を見る。
+            bool spatial = _useClipDefaults
+                ? (ResolvedSound?.SpatialBlend ?? 0f) > 0f
+                : _spatialBlend > 0f;
+            if (spatial) PushPositionAndVelocity();
         }
 
         private void OnEnable()

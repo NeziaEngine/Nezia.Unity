@@ -47,6 +47,31 @@ namespace Nezia.Unity
             return new NeziaSend(id);
         }
 
+        /// <summary>
+        /// ソース → バスの Send を作成する (User-Defined Aux Send)。Wwise / FMOD の per-event aux send 互換。
+        /// 同じ Reverb Bus を共有しつつ、音ごとに reverb 量を独立に持たせるのに使う。
+        /// ソースが despawn されると Send も自動で解放される。
+        /// </summary>
+        internal static unsafe NeziaSend AddSourceToBus(NeziaEntityId src, NeziaBus dst, NeziaSendPosition position = NeziaSendPosition.Post, float gain = 1.0f)
+        {
+            var id = LibNezia.nezia_send_add_source_to_bus(
+                NeziaEngine.RequireHandle(), src, dst.Id, (Native.NeziaSendPosition)position, gain);
+            return new NeziaSend(id);
+        }
+
+        /// <summary>
+        /// ソース → Compressor sidechain 入力の Send を作成する。
+        /// </summary>
+        internal static unsafe NeziaSend AddSourceToCompressor(NeziaEntityId src, NeziaEffect compressor, NeziaSendPosition position = NeziaSendPosition.Post, float gain = 1.0f)
+        {
+            if (compressor.Kind != NeziaEffectKind.Compressor)
+                throw new ArgumentException("compressor must be NeziaEffectKind.Compressor", nameof(compressor));
+
+            var id = LibNezia.nezia_send_add_source_to_compressor(
+                NeziaEngine.RequireHandle(), src, compressor.Id, (Native.NeziaSendPosition)position, gain);
+            return new NeziaSend(id);
+        }
+
         public unsafe float Gain
         {
             set
