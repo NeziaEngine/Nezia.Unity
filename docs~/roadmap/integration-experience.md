@@ -315,12 +315,13 @@ EditorWindow で IP-1 のアセットや実行中の状態を可視化。
 
 優先度は低いがデバッグ効率に直結する。
 
-### IP-12. Project-level Mixer + Graph Editor
+### IP-12. Project-level Mixer + Mixer Editor Window
 
 URP の `GraphicsSettings.defaultRenderPipeline` 方式に倣い、プロジェクト全体の
 グローバル Bus 構成を `Project Settings > Nezia` から **アセット参照1本** で
-管理する。あわせてバスツリーをノードグラフで編集する EditorWindow を導入し、
-Inspector の flat list より配線を一望しやすくする。
+管理する。あわせてバスツリー / Effect chain / Send 配線を直感的に編集できる
+専用 EditorWindow を導入し、Inspector の flat list を超えた authoring 体験に
+する。
 
 **位置付け:**
 - 既存 `NeziaMixerAsset`（IP-1）はそのまま実体として再利用。シリアライズ
@@ -328,6 +329,33 @@ Inspector の flat list より配線を一望しやすくする。
 - 「アクティブなミキサー構成は同時に 1 つ」という Wwise / FMOD 慣習を
   仕様レベルで明文化する。複数 Asset は override / プラットフォーム差し替え
   用の派生として残す。
+
+**UI 基盤の選定:**
+
+最初は Unity 6.2 公式 **Graph Toolkit (`com.unity.graphtoolkit`)** で実装
+（IP-12 PR-1 + PR-2 として `.neziamixer` ScriptedImporter + `NeziaMixerBusNode`
+を一度マージ）したが、以下の理由で **GTK 採用を撤回**:
+
+- GTK は **純データフロー DAG** を前提としており（Unity 自身が CHANGELOG で
+  "We no longer impose semantics like 'execution flow' on ports" と明言）、
+  バスツリーの構造的 parent-child 関係を表現するのに不向き
+- ポート型を持つ限り `<Type>Constant` ノードが ItemLibrary に自動生成される
+  仕様で、これを公開 API で抑制できない（`SupportedTypes` /
+  `ItemLibraryHelper` がすべて `[UnityRestricted] internal`）
+- typeless port は GTK 内部で `NullReferenceException`
+- `0.4.0-exp.2` で API 破壊変更が継続中
+
+**新方針: TreeView + ReorderableList + Send タブのハイブリッド構成**
+
+Wwise / FMOD / Unity Audio Mixer / CRI ADX2 など業界標準ツールが採用する
+「Hierarchy ペイン + プロパティパネル + Send タブ」UX に揃える。Unity 標準
+API のみで完結し将来安定。
+
+| 領域 | UI |
+|---|---|
+| バスツリー（階層・親子） | UI Toolkit `TreeView`（Unity 6 で強化済み） |
+| 選択バスのプロパティ / Effect chain | 右ペインに `ReorderableList` + Inspector |
+| Send / Compressor sidechain 配線 | 別タブで「source → target + gain + position」のリスト UI |
 
 #### IP-12 PR-0a: `NeziaSettings` 導入（Project Settings 連携）
 
@@ -350,58 +378,49 @@ Inspector の flat list より配線を一望しやすくする。
   に「明示 mixer 指定 → なければ `NeziaSettings.Instance.DefaultMixer`」の
   フォールバックを足す。既存挙動は破壊しない。
 
-**基盤の選定**: Unity 6.2 で公式リリースされた **Graph Toolkit
-(`com.unity.graphtoolkit`)** を採用する。これに伴い:
+#### IP-12 PR-A: `NeziaMixerWindow` スキャフォールド
 
-- パッケージ最低 Unity を **6000.2** に bump
-- `com.unity.graphtoolkit` を hard dependency に追加
-- `UnityEditor.Experimental.GraphView` 案は破棄
+- `Tools > Nezia > Mixer Editor` で開く `EditorWindow`（UI Toolkit ベース）
+- `NeziaMixerAsset` または `NeziaSettings.DefaultMixer` を target にロード
+- 左ペイン `TreeView` でバス階層を表示のみ（編集は PR-B で）
+- 上部のアセット選択 dropdown（`<Project Default>` を先頭）
 
-**アセット構造**: Shader Graph の `.shadergraph → .shader` パターンを踏襲する。
+#### IP-12 PR-B: Bus 編集（追加・削除・属性・親変更）
 
-```
-MyMixer.neziamixer
-  ├─ NeziaMixerGraph (Editor 専用 / Graph 派生・source-of-truth)
-  └─ NeziaMixerAsset (main asset / Runtime SO・ScriptedImporter が生成)
-```
+- `+ / -` ボタンで追加・削除
+- インライン rename
+- drag & drop で親変更（TreeView の `dragAndDropController`）
+- 選択中 Bus の `gain` / `muted` を右ペインで編集
+- `Undo.RecordObject` / `EditorUtility.SetDirty` 経由で履歴対応
+- `OnValidate` 同等のバリデーション（重複名・循環）を Window 上に警告表示
 
-ユーザー視点では 1 ファイル。Runtime コードは従来どおり
-`NeziaMixerAsset` 型で参照する（拡張子のみ変わる）。Graph 編集が唯一の
-入力で、SO 側は毎回 deterministic に再生成されるため source-of-truth 問題は
-発生しない。
+#### IP-12 PR-C: Effect chain ペイン
 
-#### IP-12 PR-1: ScriptedImporter + 最小 Graph スケルトン
+- 選択 Bus の右ペインに `ReorderableList` で `BusEffect` を表示
+- `+ Add Effect` メニューから kind 選択（LowPass / HighPass / Reverb / Compressor）
+- 各エフェクトはインライン展開でパラメータ編集
+- `[SerializeReference]` を活かしつつ list の順序変更で実体化順を制御
 
-- `package.json` を Unity 6.2+ + GTK 依存に更新
-- `NeziaMixerGraph` (`Graph` 派生) — `[Graph("neziamixer")]` 属性付きの空グラフ
-- `NeziaMixerImporter` (`ScriptedImporter`) — `.neziamixer` から
-  `NeziaMixerAsset` SO を main asset として生成（PR-1 では空のまま）
-- `Assets > Create > Nezia > Mixer Graph` メニュー
-- `NeziaSettings` 自動生成フローを拡張: `defaultMixer` 未設定時に
-  `Assets/Settings/DefaultMixer.neziamixer` を自動生成し、自動アサイン
+#### IP-12 PR-D: Send / sidechain 編集
 
-#### IP-12 PR-2: Bus ノード編集
+- Window 上部に `Buses` / `Sends` タブ切替
+- `Sends` タブ: `source` / `target` (Bus / Compressor sidechain) / `position` /
+  `gain` の `ReorderableList`
+- 不正 Send（未知バス・sidechain 先が Compressor でない等）の警告
+- 必要なら matrix view も検討（縦軸 source / 横軸 target）
 
-- `NeziaMixerBusNode : Node` — バスツリー上の 1 バスを表すノード
-  - `Parent` (input, single) ↔ `Output` (output, multi-out) の構造ポートで親子配線
-  - `BusName` / `Gain` / `Muted` はエッジ接続不可な **Node Option** として宣言
-    （他ノードからの dynamic 駆動を想定しないため）。ノードヘッダ下と Inspector
-    の両方にインライン編集 UI が出る
-- `NeziaMixerImporter.CompileGraph` を実装 — 全 `NeziaMixerBusNode` を走査し、
-  Parent ポート接続から `parent` を解決して `NeziaMixerAsset.buses` に書き出す
-- `NeziaMixerGraph.OnGraphChanged` — 空名 / 重複名 / 親子循環を validate し、
-  対象ノードに GTK のエラーマーカーを表示
-- `NeziaMixerAsset` に Editor / Importer 用 internal API
-  (`SetBusesForImporter` / `SetSendsForImporter`) を追加
+#### IP-12 PR-E: 起動導線 + ドキュメント
 
-#### IP-12 PR-3: Effect chain 編集
-#### IP-12 PR-4: Send / sidechain 配線 + Validate
-#### IP-12 PR-5: README / docs 更新（マイグレーション不要 — パッケージ未リリース）
+- `NeziaMixerAsset` Inspector 上部に **`Open in Mixer Editor`** ボタン
+- アセットダブルクリック (`OnOpenAssetAttribute`) で開く
+- README / 移行ガイドに新 Window の使い方を記載
 
 **完了条件:**
 - 新規プロジェクトでアセットを 1 つも作らずとも「BGM/SE Bus が鳴る」状態を
   Project Settings 1 ページのセットアップで作れる
-- バスツリーの追加・配線・Send 設定がノードグラフ上で完結する
+- バスツリーの追加・属性編集・Effect 挿入・Send 配線が `NeziaMixerWindow`
+  だけで完結する
+- Wwise / FMOD ユーザーが既視感のある UX で操作できる
 
 ---
 
