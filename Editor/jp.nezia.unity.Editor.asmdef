@@ -3,8 +3,7 @@
   "rootNamespace": "Nezia.Unity.Editor",
   "references": [
     "jp.nezia.unity.Runtime",
-    "Unity.GraphToolkit.Editor",
-    "Unity.GraphToolkit.Common.Editor"
+    "Unity.GraphToolkit.Editor"
   ],
   "includePlatforms": [
     "Editor"
