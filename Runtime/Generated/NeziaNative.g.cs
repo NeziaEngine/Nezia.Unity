@@ -495,6 +495,7 @@ namespace Nezia.Native
         ///  - Reverb: 0=RoomSize, 1=Damping, 2=Wet, 3=Dry, 4=Width (すべて [0.0, 1.0] 正規化値)
         ///  - Compressor: 0=ThresholdDb, 1=Ratio, 2=AttackMs, 3=ReleaseMs, 4=KneeDb, 5=MakeupDb
         ///  - PeakingEq: 0=CenterHz, 1=Q, 2=GainDb (`[-24.0, +24.0]` クランプ、0 で素通し)
+        ///  - Limiter: 0=CeilingDb, 1=ReleaseMs
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_effect_set_param", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern NeziaResult nezia_effect_set_param(NeziaEngine* engine, NeziaEntityId effect, byte param, float value);
@@ -576,6 +577,25 @@ namespace Nezia.Native
         internal static extern NeziaSendId nezia_send_add_bus_to_bus(NeziaEngine* engine, NeziaEntityId src, NeziaEntityId dst, NeziaSendPosition position, float gain);
 
         /// <summary>
+        ///  ソース → バスの Send を作成する (User-Defined Aux Send)。
+        ///  失敗時は `INVALID`。
+        ///
+        ///  Wwise / FMOD の per-event aux send 互換。同じ Reverb Bus を共有しつつ、音ごとに
+        ///  reverb 量を独立に持たせるのに使う (`add_send_bus_to_bus` がバス全体に同一量を
+        ///  かけるのと対比)。`src` が現在 spawn 中でない場合、audio thread 側で silently drop され、
+        ///  `Event::SourceDespawned` 経路で SendId 自体は解放される。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_send_add_source_to_bus", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaSendId nezia_send_add_source_to_bus(NeziaEngine* engine, NeziaEntityId src, NeziaEntityId dst, NeziaSendPosition position, float gain);
+
+        /// <summary>
+        ///  ソース → Compressor sidechain 入力の Send を作成する。
+        ///  `compressor` は `nezia_effect_add` で生成した Compressor の EffectId。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_send_add_source_to_compressor", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaSendId nezia_send_add_source_to_compressor(NeziaEngine* engine, NeziaEntityId src, NeziaEntityId compressor, NeziaSendPosition position, float gain);
+
+        /// <summary>
         ///  バス → Compressor sidechain 入力の Send を作成する。
         ///  `compressor` は `nezia_effect_add` で生成した Compressor の EffectId。
         /// </summary>
@@ -634,7 +654,7 @@ namespace Nezia.Native
         /// <summary>
         ///  エフェクトパラメータを Snapshot に追加する。
         ///
-        ///  `kind` は `NeziaEffectKind` (Lpf=0 / Hpf=1 / Reverb=2 / Compressor=3 / PeakingEq=4)、
+        ///  `kind` は `NeziaEffectKind` (Lpf=0 / Hpf=1 / Reverb=2 / Compressor=3 / PeakingEq=4 / Limiter=5)、
         ///  `param` は種別ごとのパラメータインデックス (`nezia_effect_set_param` と同じ意味)。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_snapshot_builder_set_effect_param", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -994,6 +1014,10 @@ namespace Nezia.Native
         ///  Phase 3-5: Parametric / Peaking EQ。1 effect = 1 band。
         /// </summary>
         PeakingEq = 4,
+        /// <summary>
+        ///  Phase 3-5: brick-wall Limiter (Bus 専用)。
+        /// </summary>
+        Limiter = 5,
     }
 
     /// <summary>
