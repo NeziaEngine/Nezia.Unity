@@ -577,6 +577,25 @@ namespace Nezia.Native
         internal static extern NeziaSendId nezia_send_add_bus_to_bus(NeziaEngine* engine, NeziaEntityId src, NeziaEntityId dst, NeziaSendPosition position, float gain);
 
         /// <summary>
+        ///  ソース → バスの Send を作成する (User-Defined Aux Send)。
+        ///  失敗時は `INVALID`。
+        ///
+        ///  Wwise / FMOD の per-event aux send 互換。同じ Reverb Bus を共有しつつ、音ごとに
+        ///  reverb 量を独立に持たせるのに使う (`add_send_bus_to_bus` がバス全体に同一量を
+        ///  かけるのと対比)。`src` が現在 spawn 中でない場合、audio thread 側で silently drop され、
+        ///  `Event::SourceDespawned` 経路で SendId 自体は解放される。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_send_add_source_to_bus", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaSendId nezia_send_add_source_to_bus(NeziaEngine* engine, NeziaEntityId src, NeziaEntityId dst, NeziaSendPosition position, float gain);
+
+        /// <summary>
+        ///  ソース → Compressor sidechain 入力の Send を作成する。
+        ///  `compressor` は `nezia_effect_add` で生成した Compressor の EffectId。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_send_add_source_to_compressor", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaSendId nezia_send_add_source_to_compressor(NeziaEngine* engine, NeziaEntityId src, NeziaEntityId compressor, NeziaSendPosition position, float gain);
+
+        /// <summary>
         ///  バス → Compressor sidechain 入力の Send を作成する。
         ///  `compressor` は `nezia_effect_add` で生成した Compressor の EffectId。
         /// </summary>
