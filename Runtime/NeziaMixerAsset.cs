@@ -185,6 +185,23 @@ namespace Nezia.Unity
         public IReadOnlyList<BusNode> Buses => buses;
         public IReadOnlyList<SendNode> Sends => sends;
 
+        // (Editor 専用) Inspector / NeziaMixerWindow から直接 list を編集するための accessor。
+        // ランタイムは IReadOnlyList 側の API を使うこと。
+        internal List<BusNode> EditableBuses => buses;
+        internal List<SendNode> EditableSends => sends;
+
+        /// <summary>
+        /// (Editor 専用) Bus / Send 編集後に解決キャッシュを破棄する。
+        /// 次回 <see cref="Resolve"/> / <see cref="ResolveSends"/> 時に lazy 再構築される。
+        /// </summary>
+        internal void InvalidateResolvedCache()
+        {
+            _byName = null;
+            _resolved.Clear();
+            _resolvedEffects.Clear();
+            _resolvedSends = null;
+        }
+
         // 解決済みバス。Generation をまたいで使い回さない（Editor 用）。
         private readonly Dictionary<string, NeziaBus> _resolved = new(StringComparer.Ordinal);
         private readonly Dictionary<string, NeziaEffect[]> _resolvedEffects = new(StringComparer.Ordinal);

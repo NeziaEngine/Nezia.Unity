@@ -378,21 +378,28 @@ API のみで完結し将来安定。
   に「明示 mixer 指定 → なければ `NeziaSettings.Instance.DefaultMixer`」の
   フォールバックを足す。既存挙動は破壊しない。
 
-#### IP-12 PR-A: `NeziaMixerWindow` スキャフォールド
+#### IP-12 PR-A / PR-B: `NeziaMixerInspector` (Custom Inspector)
 
-- `Tools > Nezia > Mixer Editor` で開く `EditorWindow`（UI Toolkit ベース）
-- `NeziaMixerAsset` または `NeziaSettings.DefaultMixer` を target にロード
-- 左ペイン `TreeView` でバス階層を表示のみ（編集は PR-B で）
-- 上部のアセット選択 dropdown（`<Project Default>` を先頭）
+`NeziaMixerAsset` の CustomEditor として実装。Project ビューでアセットを選択する
+（または `Project Settings > Nezia` の inline Inspector）と専用 UI でバスツリーを
+編集できる。当初 `EditorWindow` で実装したが、ツリー + プロパティ編集は Inspector
+に乗せる方が Unity-idiomatic（Animator / Audio Mixer 等の専用ウィンドウは
+「特殊な可視化」用で、本ケースには過剰）と判断し、PR-B のレビュー過程で
+CustomEditor に転換した。
 
-#### IP-12 PR-B: Bus 編集（追加・削除・属性・親変更）
-
-- `+ / -` ボタンで追加・削除
-- インライン rename
-- drag & drop で親変更（TreeView の `dragAndDropController`）
-- 選択中 Bus の `gain` / `muted` を右ペインで編集
-- `Undo.RecordObject` / `EditorUtility.SetDirty` 経由で履歴対応
-- `OnValidate` 同等のバリデーション（重複名・循環）を Window 上に警告表示
+- `[CustomEditor(typeof(NeziaMixerAsset))]` + `CreateInspectorGUI()`
+- 2 ペイン構成 (`TwoPaneSplitView`): 左 = TreeView / 右 = 選択バスの Inspector
+- `+ Add Bus` (兄弟として追加・Wwise/FMOD 流) / `− Delete` (子は親に昇格)
+- 右ペインで `Name` / `Gain` / `Muted` 編集
+  - `Name` / `Gain` 数値は `isDelayed = true`（入力中の二重 commit 回避）
+  - 空文字 rename は拒否
+  - リネーム時に子バスの `parent` 参照を自動追従
+- Drag & drop で親変更（自身 / 子孫へのドロップは循環防止で reject）
+- 全編集 `Undo.RecordObject` 経由（Ctrl+Z 対応）
+- 仮想 Master ルートを単一 root として表示。TreeView の id 衝突回避のため
+  Master = 1 / 実バス `i` = `i + 2` のオフセット採番
+- 空名 bus は `(unnamed)` を橙字で tree に表示
+- `NeziaMixerAsset.Validate()` をフッタにリアルタイム表示
 
 #### IP-12 PR-C: Effect chain ペイン
 
@@ -409,11 +416,13 @@ API のみで完結し将来安定。
 - 不正 Send（未知バス・sidechain 先が Compressor でない等）の警告
 - 必要なら matrix view も検討（縦軸 source / 横軸 target）
 
-#### IP-12 PR-E: 起動導線 + ドキュメント
+#### IP-12 PR-E: ドキュメント整備
 
-- `NeziaMixerAsset` Inspector 上部に **`Open in Mixer Editor`** ボタン
-- アセットダブルクリック (`OnOpenAssetAttribute`) で開く
-- README / 移行ガイドに新 Window の使い方を記載
+- README / 移行ガイドに新 Custom Inspector の使い方を記載
+- `Project Settings > Nezia` から Default Mixer を Inspector で直接編集できる
+  動線をスクリーンショット付きで紹介
+- (旧計画にあった "Open in Mixer Editor" ボタン / `OnOpenAsset` 連携は不要に
+  なった。Inspector が起動導線を兼ねるため)
 
 **完了条件:**
 - 新規プロジェクトでアセットを 1 つも作らずとも「BGM/SE Bus が鳴る」状態を
