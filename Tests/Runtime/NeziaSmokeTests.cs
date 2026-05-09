@@ -185,6 +185,138 @@ namespace Nezia.Unity.Tests
             Assert.AreEqual(NeziaEffectKind.Compressor, spec.Kind);
         }
 
+        // ─── SendNode (IP-1 PR-C) ──────────────────────────────────
+
+        [Test]
+        public void SendTargetKind_OrdinalsArePinned()
+        {
+            Assert.AreEqual(0, (byte)NeziaMixerAsset.SendTargetKind.Bus);
+            Assert.AreEqual(1, (byte)NeziaMixerAsset.SendTargetKind.CompressorSidechain);
+        }
+
+        [Test]
+        public void SendNode_Defaults()
+        {
+            var s = new NeziaMixerAsset.SendNode();
+            Assert.AreEqual(NeziaMixerAsset.SendTargetKind.Bus, s.target);
+            Assert.AreEqual(NeziaSendPosition.Post, s.position);
+            Assert.AreEqual(1f, s.gain);
+        }
+
+#if UNITY_EDITOR
+        [Test]
+        public void Sends_UnknownBuses_AreReported()
+        {
+            var asset = MakeMixer(new[] { ("BGM", ""), ("SFX", "") });
+            SetSends(asset, new[]
+            {
+                new NeziaMixerAsset.SendNode { source = "Nope", targetBus = "SFX" },
+                new NeziaMixerAsset.SendNode { source = "BGM",  targetBus = "Nada" },
+            });
+            try
+            {
+                var errs = asset.Validate();
+                Assert.IsTrue(errs.Exists(e => e.Contains("source 'Nope'")));
+                Assert.IsTrue(errs.Exists(e => e.Contains("targetBus 'Nada'")));
+            }
+            finally { ScriptableObject.DestroyImmediate(asset); }
+        }
+
+        [Test]
+        public void Sends_SelfLoop_IsReported()
+        {
+            var asset = MakeMixer(new[] { ("BGM", "") });
+            SetSends(asset, new[]
+            {
+                new NeziaMixerAsset.SendNode { source = "BGM", targetBus = "BGM" },
+            });
+            try
+            {
+                var errs = asset.Validate();
+                Assert.IsTrue(errs.Exists(e => e.Contains("同一バス")));
+            }
+            finally { ScriptableObject.DestroyImmediate(asset); }
+        }
+
+        [Test]
+        public void Sends_SidechainTargetMustBeCompressor()
+        {
+            var asset = MakeMixer(new[] { ("BGM", ""), ("SFX", "") });
+            // SFX に LowPass を 1 本だけ。sidechain 先として LowPass を指すと不正。
+            asset.Buses[1].effects.Add(new NeziaMixerAsset.LowPass());
+            SetSends(asset, new[]
+            {
+                new NeziaMixerAsset.SendNode
+                {
+                    source = "BGM",
+                    targetBus = "SFX",
+                    target = NeziaMixerAsset.SendTargetKind.CompressorSidechain,
+                    targetEffectIndex = 0,
+                },
+            });
+            try
+            {
+                var errs = asset.Validate();
+                Assert.IsTrue(errs.Exists(e => e.Contains("Compressor ではありません")));
+            }
+            finally { ScriptableObject.DestroyImmediate(asset); }
+        }
+
+        [Test]
+        public void Sends_SidechainEffectIndex_OutOfRange_IsReported()
+        {
+            var asset = MakeMixer(new[] { ("BGM", ""), ("SFX", "") });
+            SetSends(asset, new[]
+            {
+                new NeziaMixerAsset.SendNode
+                {
+                    source = "BGM",
+                    targetBus = "SFX",
+                    target = NeziaMixerAsset.SendTargetKind.CompressorSidechain,
+                    targetEffectIndex = 5,
+                },
+            });
+            try
+            {
+                var errs = asset.Validate();
+                Assert.IsTrue(errs.Exists(e => e.Contains("targetEffectIndex")));
+            }
+            finally { ScriptableObject.DestroyImmediate(asset); }
+        }
+
+        [Test]
+        public void Sends_Valid_ProducesNoErrors()
+        {
+            var asset = MakeMixer(new[] { ("BGM", ""), ("SFX", "") });
+            asset.Buses[1].effects.Add(new NeziaMixerAsset.Compressor());
+            SetSends(asset, new[]
+            {
+                new NeziaMixerAsset.SendNode { source = "BGM", targetBus = "SFX" },
+                new NeziaMixerAsset.SendNode
+                {
+                    source = "BGM",
+                    targetBus = "SFX",
+                    target = NeziaMixerAsset.SendTargetKind.CompressorSidechain,
+                    targetEffectIndex = 0,
+                },
+            });
+            try
+            {
+                Assert.IsEmpty(asset.Validate());
+                Assert.AreEqual(2, asset.Sends.Count);
+            }
+            finally { ScriptableObject.DestroyImmediate(asset); }
+        }
+
+        private static void SetSends(NeziaMixerAsset asset, NeziaMixerAsset.SendNode[] entries)
+        {
+            var field = typeof(NeziaMixerAsset).GetField("sends",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            var list = new System.Collections.Generic.List<NeziaMixerAsset.SendNode>(entries);
+            field.SetValue(asset, list);
+        }
+#endif
+
         private static NeziaMixerAsset MakeMixer((string name, string parent)[] entries)
         {
             var asset = ScriptableObject.CreateInstance<NeziaMixerAsset>();
