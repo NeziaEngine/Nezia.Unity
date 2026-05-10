@@ -807,6 +807,20 @@ namespace Nezia.Native
         [DllImport(__DllName, EntryPoint = "nezia_buffer_set_streaming_loop", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void nezia_buffer_set_streaming_loop(NeziaEngine* engine, NeziaBufferId buffer, byte looping);
 
+        /// <summary>
+        ///  Nezia エンジンのメモリ使用量スナップショットを取得する。
+        ///
+        ///  - `heap_*` / `alloc_count` / `free_count`: cdylib をビルドした場合のみ有効
+        ///    (`heap_tracked = 1`)。rlib / staticlib リンク時は 0 + `heap_tracked = 0`。
+        ///  - `voices_bytes` / `buffers_bytes` / `effects_bytes` / `graph_bytes`:
+        ///    各サブシステムが確保している `Vec` / `Box&lt;[T]&gt;` の capacity ベースの実バイト合計。
+        ///    常時取得可能。
+        ///
+        ///  取得コストは μs 未満。任意スレッドから呼べる。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_engine_get_memory_stats", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_engine_get_memory_stats(NeziaEngine* engine, NeziaMemoryStatsC* out_stats);
+
 
     }
 
@@ -1009,6 +1023,27 @@ namespace Nezia.Native
         ///  リング容量の目安 (秒)。default 1.0。
         /// </summary>
         public float buffer_seconds;
+    }
+
+    /// <summary>
+    ///  C ABI ミラー。`NeziaMemoryStats` と同じレイアウト (`#[repr(C)]`) なので
+    ///  メンバを 1 対 1 でコピーする。bool は C99 `_Bool` (= 1 byte) と揃える。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaMemoryStatsC
+    {
+        public ulong heap_bytes_in_use;
+        public ulong heap_bytes_peak;
+        public ulong alloc_count;
+        public ulong free_count;
+        /// <summary>
+        ///  0 = 無効 (`mem-tracking` feature 無効 or staticlib リンク等) / 1 = 有効。
+        /// </summary>
+        public byte heap_tracked;
+        public ulong voices_bytes;
+        public ulong buffers_bytes;
+        public ulong effects_bytes;
+        public ulong graph_bytes;
     }
 
 
