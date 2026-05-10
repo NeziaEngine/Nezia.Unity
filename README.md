@@ -41,11 +41,21 @@ Inspector とプレハブだけで成立させることを目指す。
 
 ### クイックスタート
 
-1. **Mixer Asset を作る**: `Assets/Create/Nezia/Mixer Asset` でバスツリーを Inspector で設計
+1. **Mixer Asset を確認 / 編集**: パッケージ導入後、`Assets/Settings/NeziaSettings.asset`
+   と既定の Mixer が自動生成される。`Project Settings > Nezia` または Project
+   ビューで `NeziaMixerAsset` を選択するとバスツリー / Effect chain / Send 配線を
+   Inspector で編集できる（[Mixer authoring ガイド](docs~/mixer-authoring.md)）
 2. **Clip を取り込む**: `.wav` / `.ogg` / `.flac` / `.mp3` を Project に D&D（自動で `NeziaAudioClip` になる）
 3. **Clip の音響設定を編集**: Inspector で volume / pitch / outputBus / spatial / effect chain / aux send を設定
 4. **GameObject に `NeziaAudioSource` を追加**して Clip を D&D
 5. **`Use Clip Defaults` を ON** に → Source は再生トリガに徹し、鳴り方は Clip が決定
+
+### Mixer authoring
+
+Wwise / FMOD 流の「Hierarchy + Effects + Sends」UX を Inspector で提供する。
+バスツリー編集・Effect chain・bus→bus Send・Compressor sidechain (ducking)
+までこの 1 つの Inspector で完結する。詳しくは
+[`docs~/mixer-authoring.md`](docs~/mixer-authoring.md)。
 
 ### 既存プロジェクトの移行
 
@@ -64,5 +74,6 @@ Inspector とプレハブだけで成立させることを目指す。
 ## 関連ドキュメント
 
 - ロードマップ: [`docs~/roadmap/integration-experience.md`](docs~/roadmap/integration-experience.md)
+- Mixer authoring: [`docs~/mixer-authoring.md`](docs~/mixer-authoring.md)
 - 移行ガイド: [`docs~/migration/clip-centric.md`](docs~/migration/clip-centric.md)
 - 変更履歴: [`CHANGELOG.md`](CHANGELOG.md)
