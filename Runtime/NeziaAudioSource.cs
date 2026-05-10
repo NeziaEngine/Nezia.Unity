@@ -607,6 +607,66 @@ namespace Nezia.Unity
             if (HasLiveSource) StopInternal();
         }
 
+        /// <summary>
+        /// 複数のソースを 1 回の呼び出しで停止する（バルク停止）。
+        /// 個別 <see cref="Stop"/> を N 回呼ぶと SPSC コマンドリングが詰まりやすいため、
+        /// ステージ終端などで多数のボイスを止めるときに使う。内部では
+        /// <c>nezia_source_stop_many</c> 経由で最大 32 ID／コマンドに束ねて enqueue される。
+        ///
+        /// <para>
+        /// 全ボイスを止める用途なら <see cref="NeziaEngine.StopAll"/> の方が安価。
+        /// コマンドリング満杯で一部しか enqueue できなかった場合、enqueue 成功分だけ
+        /// ローカル状態を畳み、残りは <see cref="HasLiveSource"/> のまま戻る。呼び出し側は
+        /// 戻り値で件数を確認し、未処理ぶんを次フレーム以降に再送する想定。
+        /// </para>
+        /// </summary>
+        /// <returns>実際に停止リクエストを enqueue できたソース数。</returns>
+        public static unsafe int StopMany(IReadOnlyList<NeziaAudioSource> sources)
+        {
+            if (sources == null || sources.Count == 0) return 0;
+
+            // エンジン破棄後（Domain Reload / アプリ終了）はネイティブを叩かず、
+            // 単発 Stop と同じくローカル状態だけ畳む。
+            if (!NeziaEngine.IsInitialized)
+            {
+                for (int i = 0; i < sources.Count; i++)
+                {
+                    var s = sources[i];
+                    if (s != null && s.HasLiveSource) s.ClearLocalAfterStop();
+                }
+                return 0;
+            }
+
+            int n = sources.Count;
+            var live = new NeziaAudioSource[n];
+            var ids = new NeziaEntityId[n];
+            int liveCount = 0;
+            for (int i = 0; i < n; i++)
+            {
+                var s = sources[i];
+                if (s == null || !s.HasLiveSource) continue;
+                live[liveCount] = s;
+                ids[liveCount] = s._spawnedSource;
+                liveCount++;
+            }
+            if (liveCount == 0) return 0;
+
+            nuint processed = 0;
+            fixed (NeziaEntityId* ptr = ids)
+            {
+                var r = LibNezia.nezia_source_stop_many(
+                    NeziaEngine.RequireHandle(), ptr, (nuint)liveCount, &processed);
+                // QueueFull は部分成功（processed < liveCount）。それ以外の失敗は例外化。
+                if (r != NeziaResult.Ok && r != NeziaResult.QueueFull)
+                    NeziaException.ThrowIfError(r, "stop many sources");
+            }
+
+            int processedInt = (int)processed;
+            for (int i = 0; i < processedInt; i++)
+                live[i].ClearLocalAfterStop();
+            return processedInt;
+        }
+
         /// <summary>一時停止。<c>AudioSource.Pause()</c> 互換。</summary>
         public unsafe void Pause()
         {
@@ -718,11 +778,18 @@ namespace Nezia.Unity
                 if (r != NeziaResult.Ok && r != NeziaResult.InvalidHandle)
                     NeziaException.ThrowIfError(r, "stop source");
             }
+            ClearLocalAfterStop();
+        }
+
+        // 明示 Stop の事後処理。ネイティブ側は呼び出し済み前提で、
+        // ローカル状態を畳んで finish token / live curve / spatial 登録を解放する。
+        // 明示 Stop の場合は SourceFinished が発火しないため finish token はここで Free。
+        private void ClearLocalAfterStop()
+        {
             _spawnedSource = InvalidEntityId;
             _isPlaying = false;
             _isPaused = false;
             UnregisterSpatial();
-            // 明示 Stop の場合は SourceFinished が発火しないので、ここで Free する。
             FreeFinishToken();
             DestroyLiveAttenuationCurve();
         }

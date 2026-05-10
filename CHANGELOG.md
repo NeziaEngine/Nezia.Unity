@@ -9,6 +9,13 @@
 
 ### Added
 
+- **`NeziaAudioSource.StopMany(...)`** — 複数ソースのバルク停止 API。
+  新 FFI `nezia_source_stop_many` を経由し、ステージ終端などで多数のボイスを
+  まとめて止めるときに SPSC コマンドリングの詰まりを回避する（個別 `Stop` を
+  N 回呼ぶより安価）。コマンドリング満杯時は enqueue できた件数を返し、
+  ローカル状態は成功分だけ畳むため、呼び出し側は戻り値で残数を判定して
+  再送できる。全ボイス停止用途は引き続き `NeziaEngine.StopAll` を推奨。
+
 - **IP-4 PR-D ドキュメント刷新 + サンプル追加** — Clip-centric authoring の
   浸透を完了。`Samples~/ClipCentricBasics/` を新設し、Package Manager の
   Samples から取り込める最小サンプル 3 本 (Simple Playback / Volume Pitch
