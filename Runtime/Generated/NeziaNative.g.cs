@@ -28,6 +28,31 @@ namespace Nezia.Native
         internal static extern NeziaEngine* nezia_engine_new();
 
         /// <summary>
+        ///  `EngineConfig` を指定してエンジンを生成する。失敗時は NULL を返す。
+        ///
+        ///  `config` が NULL、または `validate()` を通らなかった場合 (`max_sources == 0` /
+        ///  `max_physical_voices == 0` / `max_physical_voices &gt; max_sources`) は NULL を
+        ///  返す。`nezia_engine_new` と同様に成功時は `nezia_engine_free` で解放すること。
+        ///
+        ///  # 安全性
+        ///  `config` が非 NULL のとき `*config` が有効な `NeziaEngineConfig` であること。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_engine_new_with_config", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaEngine* nezia_engine_new_with_config(NeziaEngineConfig* config);
+
+        /// <summary>
+        ///  現行ビルドのデフォルト `EngineConfig` を `out_config` に書き出す。
+        ///
+        ///  部分的に上書きするときのテンプレートを取得するために使う。
+        ///  `out_config` が NULL なら何もせず `NullPointer` を返す。
+        ///
+        ///  # 安全性
+        ///  `out_config` が非 NULL のとき書き込み可能な `NeziaEngineConfig` を指していること。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_engine_config_default", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_engine_config_default(NeziaEngineConfig* out_config);
+
+        /// <summary>
         ///  エンジンを破棄する。NULL は無視する。
         ///
         ///  # 安全性
@@ -933,6 +958,36 @@ namespace Nezia.Native
         ///  コンテナがフレーム数を持たない場合は 0。
         /// </summary>
         public ulong total_frames;
+    }
+
+    /// <summary>
+    ///  エンジン初期化時のキャパシティ設定 (`core::EngineConfig` の ABI ミラー)。
+    ///
+    ///  `nezia_engine_new_with_config` に渡す。各値は `&gt;= 1` で
+    ///  `max_physical_voices &lt;= max_sources` を満たす必要がある。違反時は
+    ///  `nezia_engine_new_with_config` が NULL を返す。
+    ///
+    ///  `nezia_engine_config_default` で「現行ビルドのデフォルト値」を書き戻せる。
+    ///  プロジェクトで部分的に上書きするときの推奨パターン:
+    ///
+    ///  ```c
+    ///  NeziaEngineConfig cfg;
+    ///  nezia_engine_config_default(&amp;cfg);
+    ///  cfg.max_sources = 1024;
+    ///  NeziaEngine* eng = nezia_engine_new_with_config(&amp;cfg);
+    ///  ```
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaEngineConfig
+    {
+        /// <summary>
+        ///  論理ソース上限。同時に存在しうる Source の総数 (仮想化されたものを含む)。
+        /// </summary>
+        public uint max_sources;
+        /// <summary>
+        ///  物理ボイス数上限。実 DSP / ミキシングを行うボイス数。`max_sources` 以下。
+        /// </summary>
+        public uint max_physical_voices;
     }
 
     /// <summary>
