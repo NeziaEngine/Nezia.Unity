@@ -4,6 +4,7 @@
   "displayName": "Nezia Sound Engine",
   "description": "Nezia Sound Engine。",
   "unity": "2022.3",
+  "license": "MIT",
   "author": {
     "name": "Nezia",
     "email": "kaido_atsuya@atsuatsu.dev"
