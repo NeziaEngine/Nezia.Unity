@@ -263,6 +263,35 @@ namespace Nezia.Unity
             return d;
         }
 
+        /// <summary>
+        /// エンジンのメモリ使用量スナップショットを取得する。
+        ///
+        /// <para>
+        /// <see cref="NeziaMemoryStats.HeapTracked"/> が <c>true</c> のときに限り
+        /// <c>HeapBytesInUse</c> / <c>HeapBytesPeak</c> / <c>AllocCount</c> / <c>FreeCount</c>
+        /// が live で更新される (cdylib 配布時のみ)。サブシステム別の実バイト数
+        /// (<c>VoicesBytes</c> 等) は常時取得可能。
+        /// </para>
+        /// </summary>
+        public static unsafe NeziaMemoryStats GetMemoryStats()
+        {
+            NeziaMemoryStatsC raw;
+            var r = LibNezia.nezia_engine_get_memory_stats(RequireHandle(), &raw);
+            NeziaException.ThrowIfError(r, "get memory stats");
+            return new NeziaMemoryStats
+            {
+                HeapBytesInUse = raw.heap_bytes_in_use,
+                HeapBytesPeak = raw.heap_bytes_peak,
+                AllocCount = raw.alloc_count,
+                FreeCount = raw.free_count,
+                HeapTracked = raw.heap_tracked != 0,
+                VoicesBytes = raw.voices_bytes,
+                BuffersBytes = raw.buffers_bytes,
+                EffectsBytes = raw.effects_bytes,
+                GraphBytes = raw.graph_bytes,
+            };
+        }
+
         // ─── internal ────────────────────────────────────────────
 
         internal static unsafe global::Nezia.Native.NeziaEngine* RequireHandle()
@@ -319,5 +348,54 @@ namespace Nezia.Unity
         /// 1 フレームで API バーストして audio thread が drain する前にリングが詰まったケースを示す。
         /// </summary>
         public ulong CommandQueueFull;
+    }
+
+    /// <summary>
+    /// エンジンのメモリ使用量スナップショット。
+    ///
+    /// <para>
+    /// 2 つの独立した経路で「Nezia が使っているメモリ」を観測する:
+    /// </para>
+    /// <list type="number">
+    ///   <item>
+    ///     <description>
+    ///     グローバルアロケータ統計 (<see cref="HeapBytesInUse"/> 等)。
+    ///     <c>mem-tracking</c> feature を有効にした cdylib でのみ live で更新され、
+    ///     その場合 <see cref="HeapTracked"/> が <c>true</c> になる。staticlib リンク時は
+    ///     全カウンタ 0 + <see cref="HeapTracked"/> が <c>false</c>。
+    ///     </description>
+    ///   </item>
+    ///   <item>
+    ///     <description>
+    ///     各サブシステムの「論理保持バイト」 (<see cref="VoicesBytes"/> など)。
+    ///     <c>Vec.capacity * size_of</c> ベースで walker が常時集計するため、リンク形態に
+    ///     関わらず取得可能。
+    ///     </description>
+    ///   </item>
+    /// </list>
+    /// </summary>
+    public struct NeziaMemoryStats
+    {
+        /// <summary>現在ヒープに確保中のバイト数 (cdylib + <c>mem-tracking</c> 時のみ有効)。</summary>
+        public ulong HeapBytesInUse;
+        /// <summary>起動以降のヒープ使用量ピーク (cdylib + <c>mem-tracking</c> 時のみ有効)。</summary>
+        public ulong HeapBytesPeak;
+        /// <summary>累積 alloc 回数 (cdylib + <c>mem-tracking</c> 時のみ有効)。</summary>
+        public ulong AllocCount;
+        /// <summary>累積 free 回数 (cdylib + <c>mem-tracking</c> 時のみ有効)。</summary>
+        public ulong FreeCount;
+        /// <summary>
+        /// グローバルアロケータ統計が live で更新されているか。<c>false</c> のとき
+        /// <see cref="HeapBytesInUse"/> 系は常に 0。
+        /// </summary>
+        public bool HeapTracked;
+        /// <summary>ボイス / ソース系サブシステムの論理保持バイト数。</summary>
+        public ulong VoicesBytes;
+        /// <summary>オーディオバッファプールの論理保持バイト数 (PCM 実バイトを含む)。</summary>
+        public ulong BuffersBytes;
+        /// <summary>エフェクト系ワールドの論理保持バイト数。</summary>
+        public ulong EffectsBytes;
+        /// <summary>バス / ルーティンググラフの論理保持バイト数。</summary>
+        public ulong GraphBytes;
     }
 }
