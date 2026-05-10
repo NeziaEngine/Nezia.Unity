@@ -8,7 +8,10 @@
     "name": "Nezia",
     "email": "kaido_atsuya@atsuatsu.dev"
   },
-  "dependencies": {},
+  "dependencies": {
+    "com.unity.burst": "1.8.13",
+    "com.unity.collections": "2.4.0"
+  },
   "samples": [
     {
       "displayName": "Clip-centric Basics",

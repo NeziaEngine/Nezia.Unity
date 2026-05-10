@@ -96,6 +96,11 @@ namespace Nezia.Unity
         // Play で生成 → Stop / 自然終了 / Disable で Destroy する。
         private NeziaAttenuationCurve _liveAttenuationCurve = NeziaAttenuationCurve.Invalid;
 
+        // NeziaSpatialUpdater 上での自分の index。-1 = 未登録。
+        // spatial > 0 で Play 中のときだけ登録され、Stop / 自然終了 / Disable で解除される。
+        // updater 側 swap-back で index が変わると NotifySpatialIndexChanged が呼ばれる。
+        private int _spatialIndex = -1;
+
         private bool HasLiveSource => _spawnedSource.index != uint.MaxValue;
 
         /// <summary>カスタム距離減衰カーブのアセット。未設定なら <see cref="rolloffMode"/> が使われる。</summary>
@@ -473,7 +478,6 @@ namespace Nezia.Unity
             _spawnedSource = src;
             _isPlaying = true;
             _isPaused = false;
-            _hasPrevPosition = false;
 
             if (_useClipDefaults)
             {
@@ -640,17 +644,8 @@ namespace Nezia.Unity
             if (_playOnAwake && ResolvedSound != null) Play();
         }
 
-        private void LateUpdate()
-        {
-            if (!_isPlaying || _isPaused) return;
-            // useClipDefaults=true: per-property override を尊重して effective spatial を決める。
-            // false (legacy): 従来どおり Source 側 _spatialBlend を見る。
-            float effSpatial;
-            if (!_useClipDefaults) effSpatial = _spatialBlend;
-            else if (_overrideSpatial) effSpatial = _spatialBlend;
-            else effSpatial = ResolvedSound?.SpatialBlend ?? 0f;
-            if (effSpatial > 0f) PushPositionAndVelocity();
-        }
+        // 位置 / 速度更新は NeziaSpatialUpdater が TransformAccessArray + Burst Job で
+        // 一括処理するため、各 Source 側で LateUpdate を持たない（per-MB ディスパッチを排除）。
 
         private void OnEnable()
         {
@@ -659,7 +654,7 @@ namespace Nezia.Unity
             _spawnedSource = InvalidEntityId;
             _isPlaying = false;
             _isPaused = false;
-            _hasPrevPosition = false;
+            _spatialIndex = -1;
         }
 
         private void OnDisable() => Stop();
@@ -680,10 +675,21 @@ namespace Nezia.Unity
             _spawnedSource = InvalidEntityId;
             _isPlaying = false;
             _isPaused = false;
+            UnregisterSpatial();
             // 明示 Stop の場合は SourceFinished が発火しないので、ここで Free する。
             FreeSelfHandle();
             DestroyLiveAttenuationCurve();
         }
+
+        private void UnregisterSpatial()
+        {
+            if (_spatialIndex < 0) return;
+            NeziaSpatialUpdater.Unregister(_spatialIndex);
+            _spatialIndex = -1;
+        }
+
+        // NeziaSpatialUpdater の swap-back で自分の index が変わった際の通知。
+        internal void NotifySpatialIndexChanged(int newIndex) => _spatialIndex = newIndex;
 
         private void DestroyLiveAttenuationCurve()
         {
@@ -729,104 +735,19 @@ namespace Nezia.Unity
             _isPlaying = false;
             _isPaused = false;
             _selfHandle = default; // 呼び出し元 (OnNativeFinishedStatic) が Free する。
+            UnregisterSpatial();
             DestroyLiveAttenuationCurve();
 
             if (_destroyOnFinish && this != null) Destroy(gameObject);
         }
 
-        // 速度（Doppler 用）は前フレーム位置との差分を Time.deltaTime で割って自動算出する。
-        // ユーザーが明示的に Rigidbody.velocity 等を渡すフックは現状用意していない。
-        private Vector3 _prevPosition;
-        private bool _hasPrevPosition;
-
+        // 位置 / 速度は NeziaSpatialUpdater 側の Job で transform.position から直接読む。
+        // Spawn 直後の初回登録のみここで行い、以降は updater が毎フレーム並列に処理する。
         private void PushPosition()
         {
             if (!HasLiveSource) return;
-            var p = transform.position;
-            EnqueuePendingPosition(new NeziaSourcePositionUpdate
-            {
-                source = _spawnedSource,
-                position = new NeziaVec3 { x = p.x, y = p.y, z = p.z },
-            });
-        }
-
-        private void PushPositionAndVelocity()
-        {
-            if (!HasLiveSource) return;
-            var p = transform.position;
-            EnqueuePendingPosition(new NeziaSourcePositionUpdate
-            {
-                source = _spawnedSource,
-                position = new NeziaVec3 { x = p.x, y = p.y, z = p.z },
-            });
-
-            var dt = Time.deltaTime;
-            var v = (_hasPrevPosition && dt > 0f) ? (p - _prevPosition) / dt : Vector3.zero;
-            _prevPosition = p;
-            _hasPrevPosition = true;
-            EnqueuePendingVelocity(new NeziaSourceVelocityUpdate
-            {
-                source = _spawnedSource,
-                velocity = new NeziaVec3 { x = v.x, y = v.y, z = v.z },
-            });
-        }
-
-        // ─── 位置更新の一括送信 ──────────────────────────────────
-        //
-        // 各ソースが個別に nezia_source_batch_set_positions を呼ぶと、
-        // 1 フレームに多数のソースがあるとき FFI 越えの回数がそのまま線形に増える。
-        // 同フレーム内の更新は静的バッファへ積み、フレーム末尾の
-        // NeziaEnginePump からまとめて 1 回の FFI 呼び出しで送る。
-
-        private static NeziaSourcePositionUpdate[] s_pendingPositions = new NeziaSourcePositionUpdate[64];
-        private static int s_pendingPositionCount;
-        private static NeziaSourceVelocityUpdate[] s_pendingVelocities = new NeziaSourceVelocityUpdate[64];
-        private static int s_pendingVelocityCount;
-
-        private static void EnqueuePendingPosition(NeziaSourcePositionUpdate update)
-        {
-            if (s_pendingPositionCount == s_pendingPositions.Length)
-                Array.Resize(ref s_pendingPositions, s_pendingPositions.Length * 2);
-            s_pendingPositions[s_pendingPositionCount++] = update;
-        }
-
-        private static void EnqueuePendingVelocity(NeziaSourceVelocityUpdate update)
-        {
-            if (s_pendingVelocityCount == s_pendingVelocities.Length)
-                Array.Resize(ref s_pendingVelocities, s_pendingVelocities.Length * 2);
-            s_pendingVelocities[s_pendingVelocityCount++] = update;
-        }
-
-        internal static unsafe void FlushPendingPositions()
-        {
-            if (!NeziaEngine.IsInitialized)
-            {
-                s_pendingPositionCount = 0;
-                s_pendingVelocityCount = 0;
-                return;
-            }
-
-            if (s_pendingPositionCount > 0)
-            {
-                fixed (NeziaSourcePositionUpdate* ptr = s_pendingPositions)
-                {
-                    var r = LibNezia.nezia_source_batch_set_positions(
-                        NeziaEngine.RequireHandle(), ptr, (nuint)s_pendingPositionCount);
-                    NeziaException.ThrowIfError(r, "batch set source positions");
-                }
-                s_pendingPositionCount = 0;
-            }
-
-            if (s_pendingVelocityCount > 0)
-            {
-                fixed (NeziaSourceVelocityUpdate* ptr = s_pendingVelocities)
-                {
-                    var r = LibNezia.nezia_source_batch_set_velocities(
-                        NeziaEngine.RequireHandle(), ptr, (nuint)s_pendingVelocityCount);
-                    NeziaException.ThrowIfError(r, "batch set source velocities");
-                }
-                s_pendingVelocityCount = 0;
-            }
+            if (_spatialIndex >= 0) return; // 二重登録防止
+            _spatialIndex = NeziaSpatialUpdater.Register(this, transform, _spawnedSource);
         }
     }
 }
