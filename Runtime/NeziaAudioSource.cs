@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using AOT;
 using Nezia.Native;
@@ -88,9 +89,18 @@ namespace Nezia.Unity
         private bool _isPlaying;
         private bool _isPaused;
 
-        // ネイティブ完了コールバックから自分自身を辿るための GCHandle。
-        // 自然終了（コールバック発火）または明示 Stop で必ず Free する。
-        private GCHandle _selfHandle;
+        // ネイティブ完了コールバックから自分自身を辿るためのトークン。
+        // GCHandle を直接 userData に渡すと、Free 後に slot が再利用された際に
+        // 過去 enqueue 済みイベントが新しい "different domain" の Target を指してしまう
+        // (ManagedThreadId が変わって発火元の domain と一致しない) 問題があるため、
+        // ここでは long トークンを userData に渡し、辞書経由で GCHandle を引く。
+        // Stop 時は辞書から token を消すだけ。stale event は Remove が false で silent return。
+        private long _finishToken;
+
+        private static readonly object s_finishTokensLock = new object();
+        private static long s_nextFinishToken = 1;
+        private static readonly Dictionary<long, GCHandle> s_finishTokens =
+            new Dictionary<long, GCHandle>();
 
         // Inspector で AnimationCurve として編集された減衰カーブを再生中だけネイティブ確保しておく。
         // Play で生成 → Stop / 自然終了 / Disable で Destroy する。
@@ -463,8 +473,15 @@ namespace Nezia.Unity
             void* userData = null;
             if (!effectiveLoop && asset.SupportsFinishCallback)
             {
-                _selfHandle = GCHandle.Alloc(this, GCHandleType.Weak);
-                userData = (void*)GCHandle.ToIntPtr(_selfHandle);
+                var handle = GCHandle.Alloc(this, GCHandleType.Weak);
+                long token;
+                lock (s_finishTokensLock)
+                {
+                    token = s_nextFinishToken++;
+                    s_finishTokens[token] = handle;
+                }
+                _finishToken = token;
+                userData = (void*)(IntPtr)token;
                 cb = (delegate* unmanaged[Cdecl]<void*, void>)s_finishCallbackPtr;
             }
 
@@ -513,7 +530,7 @@ namespace Nezia.Unity
             {
                 // SPSC リング満杯または MAX_SOURCES 到達。確保済み curve を解放してから return。
                 if (liveCurve.IsValid) liveCurve.Destroy();
-                FreeSelfHandle();
+                FreeFinishToken();
                 return; // INVALID
             }
 
@@ -706,7 +723,7 @@ namespace Nezia.Unity
             _isPaused = false;
             UnregisterSpatial();
             // 明示 Stop の場合は SourceFinished が発火しないので、ここで Free する。
-            FreeSelfHandle();
+            FreeFinishToken();
             DestroyLiveAttenuationCurve();
         }
 
@@ -727,10 +744,17 @@ namespace Nezia.Unity
             _liveAttenuationCurve = NeziaAttenuationCurve.Invalid;
         }
 
-        private void FreeSelfHandle()
+        private void FreeFinishToken()
         {
-            if (_selfHandle.IsAllocated) _selfHandle.Free();
-            _selfHandle = default;
+            if (_finishToken == 0) return;
+            GCHandle h = default;
+            bool found;
+            lock (s_finishTokensLock)
+            {
+                found = s_finishTokens.Remove(_finishToken, out h);
+            }
+            if (found && h.IsAllocated) h.Free();
+            _finishToken = 0;
         }
 
         // ネイティブからのコールバック用デリゲート。Unity (Mono / IL2CPP) では
@@ -745,25 +769,34 @@ namespace Nezia.Unity
         [MonoPInvokeCallback(typeof(NativeFinishCallback))]
         private static void OnNativeFinishedStatic(IntPtr userData)
         {
-            var handle = GCHandle.FromIntPtr(userData);
+            long token = userData.ToInt64();
+            GCHandle handle;
+            bool found;
+            lock (s_finishTokensLock)
+            {
+                found = s_finishTokens.Remove(token, out handle);
+            }
+            // 既に Stop 済み or stale event (GCHandle slot 再利用後の遅延発火) は silent return。
+            if (!found) return;
             try
             {
                 if (handle.Target is NeziaAudioSource src) src.OnNaturallyFinished();
             }
             finally
             {
-                handle.Free();
+                if (handle.IsAllocated) handle.Free();
             }
         }
 
         private void OnNaturallyFinished()
         {
-            // 既に Stop 済みのときは何もしない（Stop 経由で _selfHandle は free 済み）。
+            // 既に Stop 済みのときは何もしない（Stop 経由で token は辞書から remove 済み）。
             if (!HasLiveSource) return;
             _spawnedSource = InvalidEntityId;
             _isPlaying = false;
             _isPaused = false;
-            _selfHandle = default; // 呼び出し元 (OnNativeFinishedStatic) が Free する。
+            // token は呼び出し元 (OnNativeFinishedStatic) が辞書から remove 済み。
+            _finishToken = 0;
             UnregisterSpatial();
             DestroyLiveAttenuationCurve();
 
