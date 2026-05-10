@@ -9,6 +9,137 @@
 
 ### Added
 
+- **IP-4 PR-D ドキュメント刷新 + サンプル追加** — Clip-centric authoring の
+  浸透を完了。`Samples~/ClipCentricBasics/` を新設し、Package Manager の
+  Samples から取り込める最小サンプル 3 本 (Simple Playback / Volume Pitch
+  Scaling / Source Override) を提供。`package.json` に `samples` 宣言を
+  追加し、README にも Clip-centric の最小コード例を掲載。
+
+- **IP-12 PR-E ドキュメント整備** — `NeziaMixerInspector` (Buses / Effects /
+  Sends タブ) の使い方・Compressor sidechain (ducking) の組み立て手順・
+  バリデーション・Undo / Redo の挙動を [`docs~/mixer-authoring.md`](docs~/mixer-authoring.md)
+  にまとめた。README の Quickstart からも導線を張った。
+
+- **IP-12 PR-D Send / sidechain タブ** — `NeziaMixerInspector` 上部に
+  `Buses` / `Sends` のタブストリップを追加し、Send 配線を専用 UI で編集できる
+  ようにした。
+  - **`+ Add Send`** で Send 行を追加。各行は **source bus** / **target kind**
+    (`Bus` / `CompressorSidechain`) / **target bus** のドロップダウンに加え、
+    sidechain 時は対象バス上の **Compressor インデックス**ピッカーが現れる
+  - 各 Send 行で **Position** (Pre / Post) と **Gain** (0〜4) を編集
+  - 全編集 `Undo.RecordObject` 経由。値編集 (gain / position 等) では行を
+    再生成しないため、Slider のドラッグ操作中もフォーカスが切れない
+  - 不正 Send (未知バス・sidechain 先が Compressor でない等) は既存の
+    `NeziaMixerAsset.Validate` がフッタに警告として表示
+
+- **IP-12 PR-C Effect chain ペイン** — `NeziaMixerInspector` の右ペインに
+  選択中バスの Effect chain 編集 UI を追加。
+  - **`+ Add` ドロップダウン** で `LowPass` / `HighPass` / `Reverb` / `Compressor`
+    を追加
+  - 各 effect 行: ヘッダ (`▲` / `▼` で順序入れ替え / kind ラベル / `enabled`
+    トグル / `×` 削除) + `Position` (Pre / Post) + kind 固有パラメータ
+  - per-kind フィールド:
+    - `LowPass` / `HighPass`: cutoff (20〜20000) / Q (0.1〜10)
+    - `Reverb`: roomSize / damping / wet / dry / width (各 0〜1)
+    - `Compressor`: thresholdDb / ratio / attackMs / releaseMs / kneeDb / makeupDb
+  - 全編集 `Undo.RecordObject` 経由 (Ctrl+Z 対応)、編集後は
+    `InvalidateResolvedCache` で次回 Resolve 時に effect chain を再構築させる
+  - 右ペインを `ScrollView` でラップし、effect が増えても縦に伸ばせる
+
+- **IP-12 PR-A / PR-B `NeziaMixerInspector` (Custom Inspector)** —
+  `NeziaMixerAsset` を Project ビューで選択するか `Project Settings > Nezia` の
+  inline Inspector から、専用 UI でバスツリーを編集できるようになった。
+  当初 `EditorWindow` (`NeziaMixerWindow`) として実装したが、ツリー + プロパティ
+  編集は CustomEditor として Inspector に乗せる方が Unity-idiomatic（Animator や
+  Audio Mixer 等の専用ウィンドウは「特殊な可視化」が必要なケース向け）なので、
+  PR-B のレビュー過程で **`CustomEditor(typeof(NeziaMixerAsset))` に転換**。
+  すべて UI Toolkit 実装。
+  - 2 ペイン構成 (`TwoPaneSplitView`): 左 = TreeView / 右 = 選択バスの Inspector
+  - **`+ Add Bus` / `− Delete`** ボタン
+    - `Add` は選択中バスと同じ階層に兄弟として追加 (Wwise / FMOD 流)。名前は
+      `New Bus` 〜 `New Bus (N)` で自動的に重複回避
+    - `Delete` は選択バスを削除。子バスは削除対象の親に昇格 (カスケード削除しない)
+  - 右ペインに **Name** / **Gain (Slider + FloatField)** / **Muted**
+    - 入力中の二重 commit を避けるため `Name` / `Gain` 数値は `isDelayed = true`
+    - 空文字への rename は拒否し UI を旧名に戻す（親子参照が壊れるため）
+    - リネーム時、子バスの `parent` 参照も自動的に新名へ追従
+  - **Drag &amp; drop で親変更** — TreeView 上でバスをドラッグ → 別バスや Master 配下に
+    ドロップ可。自分自身 / 自分の子孫へのドロップは循環防止のため reject
+  - 全編集が `Undo.RecordObject` 経由 (Ctrl+Z 対応)、`Undo` / `Redo` 後は UI 自動リフレッシュ
+  - 仮想 Master ルートを単一 root として表示。TreeView の id 衝突回避のため、
+    Master = 1 / 実バス `i` = `i + 2` のオフセット採番
+  - 空名 bus は `(unnamed)` を橙字で tree に表示し、選択して名前を直せるようにする
+  - フッタに `NeziaMixerAsset.Validate()` の結果（重複名 / 未知 parent / 循環など）を
+    リアルタイム表示
+  - `NeziaMixerAsset` に Editor 専用 internal API を追加: `EditableBuses` /
+    `EditableSends` / `InvalidateResolvedCache`
+  - GTK ベースのノードグラフ案 (旧 IP-12 PR-1+2) は撤回し、Wwise / FMOD /
+    Unity Audio Mixer と同じ `TreeView + UI Toolkit ListView` ハイブリッドに転換
+
+- **IP-12 PR-0a `NeziaSettings` 導入** — URP の `GraphicsSettings` 方式に倣い、
+  プロジェクト全体の Nezia 既定設定を `Project Settings > Nezia` から
+  アセット参照 1 本で管理できるようにした。
+  - `NeziaSettings : ScriptableObject`（Runtime）— `defaultMixer:
+    NeziaMixerAsset` を持つ singleton SO。`NeziaSettings.Instance` でランタイム
+    取得（Editor は `EditorBuildSettings.TryGetConfigObject` 経由、ビルドでは
+    PlayerSettings の preloaded assets として自動ロード）
+  - `Project Settings > Nezia` ページ（`NeziaSettingsProvider`）— Settings Asset
+    の ObjectField + `Create New...` + 選択中アセットの inline Inspector。
+    アセット指定時に `EditorBuildSettings.AddConfigObject` と PlayerSettings
+    preloaded assets への登録を自動で行う
+  - パッケージ導入時 / Editor 起動時に `Assets/Settings/NeziaSettings.asset`
+    を自動生成し、`EditorBuildSettings` と PlayerSettings preloaded assets に
+    登録する（`[InitializeOnLoadMethod]`）。プロジェクト内に既に
+    `NeziaSettings` が存在する場合はそれを採用するため重複作成されない
+  - `NeziaSoundAsset.ResolveOutputBus` / `NeziaAudioSource.Start` の解決順に
+    「明示 mixer 指定 → なければ `NeziaSettings.Instance.DefaultMixer`」
+    フォールバックを追加。既存挙動は破壊しない（明示 mixer がある場合の動作は
+    従来どおり）
+
+- **IP-4 Clip-centric authoring**（PR-A〜C2）— 「鳴り方は Clip が決め、
+  Source は『いつ・どこで』だけ」という Wwise / FMOD 流の authoring モデルへ
+  転換。詳細は [`docs~/migration/clip-centric.md`](docs~/migration/clip-centric.md)。
+  - `NeziaSoundAsset` 基底（IP-4 PR-A、#33）に音響デフォルト 12 フィールドを追加:
+    `Volume` / `Pitch` / `Loop` / `OutputMixerAsset`+`OutputBusName` /
+    `SpatialBlend` / `MinDistance` / `MaxDistance` / `RolloffMode` /
+    `AttenuationCurve` / `DopplerLevel` / `Priority`
+  - `NeziaSoundAsset.SourceEffect` 宣言（`LowPass` / `HighPass` / `Reverb` /
+    `Compressor`、`[SerializeReference]` 多態シリアライズ）— Clip 起点の
+    エフェクトチェーンを Inspector で定義可
+  - `NeziaSoundAsset.SourceSend` 宣言 — Clip 起点の Aux Send（Bus / Compressor
+    sidechain）。Wwise の per-event aux send 互換で、同じ Reverb Bus を
+    共有しつつ音ごとに reverb 量を独立に持たせられる。
+    新規 core FFI `nezia_send_add_source_to_bus` /
+    `nezia_send_add_source_to_compressor` を経由
+  - `NeziaSoundAsset.ApplyAcousticsTo` / `ApplyEffectsAndSendsTo` /
+    `ApplyDefaultsTo` / `ResolveOutputBus` — Spawn 直後の source に音響設定を
+    一括適用するヘルパ。effect / send は core 側の自動 cleanup 規約に乗るため
+    解放管理不要
+  - `NeziaSend.AddSourceToBus` / `AddSourceToCompressor`（internal wrapper）—
+    新規 core FFI への薄いブリッジ
+  - `NeziaAudioSource.useClipDefaults`（IP-4 PR-A、既定 `false` で後方互換）—
+    `true` のとき音響設定を Clip に委譲する master toggle
+  - `NeziaAudioSource` の per-property override flag 群（IP-4 PR-B、#35）:
+    `_overrideOutputBus` / `_overrideSpatial` / `_overrideAttenuation` /
+    `_overrideDoppler` / `_overridePriority` / `_overrideLoop`。
+    `useClipDefaults=true` のときに「Clip 値を使う / Source 値で override する」
+    を per-property に決める
+  - 各プロパティ setter の auto-flip — `source.spatialBlend = 1f` 等の代入で
+    対応する override flag が暗黙に true になる。既存スクリプトが Clip-centric
+    モードでも違和感なく動く
+  - `NeziaAudioSource.Play()` の二系統分岐 — `useClipDefaults=true` 時は
+    per-property に Source / Clip 値を選択して `ApplyAcousticsTo` に渡し、
+    `ApplyEffectsAndSendsTo` で Clip 起点 effect / send を実体化する
+  - **Custom Inspector** `NeziaAudioSourceEditor`（IP-4 PR-C1、#36）—
+    override-aware UI。各 overridable パラメータに override トグル + 未 override
+    時の `Clip default: ...` 補助ラベル。volume / pitch は scale 合成後の最終値
+    （例: `× Clip 0.8 = 0.4`）をインライン表示
+  - **マイグレーションコマンド**（IP-4 PR-C2、#37）:
+    - `Tools/Nezia/Convert Selection to Clip-centric Mode` — 選択 Source の
+      `useClipDefaults` を flip し、Source 値が Clip 値と異なる項目だけ
+      override ON で残す
+    - `Tools/Nezia/Revert Selection to Legacy Mode` — 互換モードへ戻す逆方向
+
 - `NeziaMixerAsset`（`ScriptableObject`、IP-1 PR-A）— バスツリーを Inspector で
   設計するための flat list。`BusNode { name, parent, gain, muted }` を持ち、
   `parent` 空文字なら Master 直下、そうでなければ同アセット内の別バス配下に紐付く。

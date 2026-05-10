@@ -49,15 +49,33 @@ namespace Nezia.Unity
 
         // IP-4 (Clip-centric authoring): true のとき音響設定を sound asset 側に委譲する。
         // - volume / pitch は Clip 値への乗算 (scale) として動く
-        // - loop は Source または Clip のいずれかが true なら有効
-        // - outputBus は Source 側未設定なら Clip の `OutputMixerAsset`/`OutputBusName` を解決
-        // - spatial / attenuation / doppler / priority は Clip の `ApplyDefaultsTo` が一括適用
+        // - loop / outputBus / spatial / attenuation / doppler / priority は per-property の
+        //   `_overrideXxx` フラグで Clip 値か Source 値かを選択する
         // 既存プレハブでの破壊的変更を避けるため既定は false。新規 NeziaAudioSource では
         // 推奨値 true。マイグレーションコマンドは PR-C で提供予定。
         [SerializeField,
          Tooltip("ON: 音響設定を Clip (NeziaSoundAsset) に委譲し、Source.volume/pitch は scale として効く。" +
                  "OFF (互換モード): Source 側の値が直接最終値になる従来挙動。")]
         private bool _useClipDefaults;
+
+        // ─── Per-property override（IP-4 PR-B） ──────────────────
+        //
+        // useClipDefaults=true のとき Source プロパティを Clip 値の上から override するか決めるフラグ群。
+        // 既定はすべて false = Clip 値を採用。Source の対応 setter (e.g. `source.spatialBlend = 1f`) を
+        // 呼ぶと暗黙に true に切り替わるため、従来のスクリプト記述で違和感なく override できる。
+        // useClipDefaults=false (legacy) のときは互換挙動が支配するためフラグは無視される。
+        [SerializeField, Tooltip("Source.outputBus を Clip より優先する。")]
+        private bool _overrideOutputBus;
+        [SerializeField, Tooltip("Source の spatialBlend / 距離 / rolloff を Clip より優先する。")]
+        private bool _overrideSpatial;
+        [SerializeField, Tooltip("Source.attenuationCurve を Clip より優先する。")]
+        private bool _overrideAttenuation;
+        [SerializeField, Tooltip("Source.dopplerLevel を Clip より優先する。")]
+        private bool _overrideDoppler;
+        [SerializeField, Tooltip("Source.priority を Clip より優先する。")]
+        private bool _overridePriority;
+        [SerializeField, Tooltip("Source.loop を Clip より優先する。")]
+        private bool _overrideLoop;
 
         // ─── ランタイム状態 ──────────────────────────────────────
 
@@ -78,13 +96,18 @@ namespace Nezia.Unity
         // Play で生成 → Stop / 自然終了 / Disable で Destroy する。
         private NeziaAttenuationCurve _liveAttenuationCurve = NeziaAttenuationCurve.Invalid;
 
+        // NeziaSpatialUpdater 上での自分の index。-1 = 未登録。
+        // spatial > 0 で Play 中のときだけ登録され、Stop / 自然終了 / Disable で解除される。
+        // updater 側 swap-back で index が変わると NotifySpatialIndexChanged が呼ばれる。
+        private int _spatialIndex = -1;
+
         private bool HasLiveSource => _spawnedSource.index != uint.MaxValue;
 
         /// <summary>カスタム距離減衰カーブのアセット。未設定なら <see cref="rolloffMode"/> が使われる。</summary>
         public NeziaAttenuationCurveAsset attenuationCurve
         {
             get => _attenuationCurve;
-            set => _attenuationCurve = value;
+            set { _attenuationCurve = value; _overrideAttenuation = true; }
         }
 
         // ─── AudioSource 互換 API ────────────────────────────────
@@ -181,6 +204,7 @@ namespace Nezia.Unity
             set
             {
                 _loop = value;
+                _overrideLoop = true;
                 if (HasLiveSource)
                 {
                     var r = LibNezia.nezia_source_set_loop(
@@ -208,16 +232,32 @@ namespace Nezia.Unity
         }
 
         /// <summary>2D/3D ブレンド (0=2D, 1=3D)。<c>AudioSource.spatialBlend</c> 互換。</summary>
-        public float spatialBlend { get => _spatialBlend; set => _spatialBlend = Mathf.Clamp01(value); }
+        public float spatialBlend
+        {
+            get => _spatialBlend;
+            set { _spatialBlend = Mathf.Clamp01(value); _overrideSpatial = true; }
+        }
 
         /// <summary>距離減衰の最小距離。</summary>
-        public float minDistance { get => _minDistance; set => _minDistance = value; }
+        public float minDistance
+        {
+            get => _minDistance;
+            set { _minDistance = value; _overrideSpatial = true; }
+        }
 
         /// <summary>距離減衰の最大距離。</summary>
-        public float maxDistance { get => _maxDistance; set => _maxDistance = value; }
+        public float maxDistance
+        {
+            get => _maxDistance;
+            set { _maxDistance = value; _overrideSpatial = true; }
+        }
 
         /// <summary>距離減衰モデル。</summary>
-        public NeziaRolloffMode rolloffMode { get => _rolloffMode; set => _rolloffMode = value; }
+        public NeziaRolloffMode rolloffMode
+        {
+            get => _rolloffMode;
+            set { _rolloffMode = value; _overrideSpatial = true; }
+        }
 
         /// <summary>
         /// Doppler 効果の強度。<c>AudioSource.dopplerLevel</c> 互換。
@@ -230,6 +270,7 @@ namespace Nezia.Unity
             set
             {
                 _dopplerLevel = Mathf.Clamp(value, 0f, 5f);
+                _overrideDoppler = true;
                 if (HasLiveSource)
                 {
                     var r = LibNezia.nezia_source_set_doppler_level(
@@ -256,6 +297,7 @@ namespace Nezia.Unity
             set
             {
                 _priority = Mathf.Clamp(value, 0, 255);
+                _overridePriority = true;
                 if (HasLiveSource)
                 {
                     var r = LibNezia.nezia_source_set_priority(
@@ -274,8 +316,14 @@ namespace Nezia.Unity
         /// <summary>
         /// 出力先 <see cref="NeziaBus"/>。<c>AudioSource.outputAudioMixerGroup</c> の代替。
         /// 未設定（<see cref="NeziaBus.Invalid"/>）の場合はマスターバスへ送られる。
+        /// 代入時に override flag が立つので、useClipDefaults=true でも Source 側が優先される。
         /// </summary>
-        public NeziaBus outputBus { get; set; } = NeziaBus.Invalid;
+        private NeziaBus _outputBusValue = NeziaBus.Invalid;
+        public NeziaBus outputBus
+        {
+            get => _outputBusValue;
+            set { _outputBusValue = value; _overrideOutputBus = true; }
+        }
 
         /// <summary>
         /// <c>AudioSource.outputAudioMixerGroup</c> 互換。<see cref="NeziaBusMap"/> が
@@ -379,29 +427,33 @@ namespace Nezia.Unity
 
             // ── volume / pitch / loop / bus を Clip-side 既定と合成 ──────────
             //
-            // useClipDefaults=true: Source の volume/pitch は Clip 基準値への scale。
-            //   loop は Source または Clip の論理和（Source.loop=true なら強制ループ可）。
-            //   bus は Source 側設定が優先、未設定なら Clip の outputBus、最後に Master。
+            // useClipDefaults=true: Source の volume/pitch は常に Clip 基準値への scale (override 無し)。
+            //   loop / bus は per-property override flag が true なら Source 値、false なら Clip 値を採用。
             // useClipDefaults=false (legacy): Source の値がそのまま最終値。
             float clipV = _useClipDefaults ? asset.Volume : 1f;
             float clipP = _useClipDefaults ? asset.Pitch : 1f;
-            bool effectiveLoop = _useClipDefaults ? (_loop || asset.Loop) : _loop;
             float effectiveVolume = (_mute ? 0f : _volume) * clipV;
             float effectivePitch = _pitch * clipP;
 
+            bool effectiveLoop;
+            if (!_useClipDefaults) effectiveLoop = _loop;
+            else effectiveLoop = _overrideLoop ? _loop : asset.Loop;
+
             NeziaEntityId busId;
-            if (outputBus.IsValid)
+            if (!_useClipDefaults)
+            {
+                busId = outputBus.IsValid
+                    ? outputBus.Id
+                    : LibNezia.nezia_engine_master_bus(engine);
+            }
+            else if (_overrideOutputBus && outputBus.IsValid)
             {
                 busId = outputBus.Id;
             }
-            else if (_useClipDefaults)
+            else
             {
                 var clipBus = asset.ResolveOutputBus();
                 busId = clipBus.IsValid ? clipBus.Id : LibNezia.nezia_engine_master_bus(engine);
-            }
-            else
-            {
-                busId = LibNezia.nezia_engine_master_bus(engine);
             }
 
             // 自然終了をネイティブから受け取るためのコールバック登録。
@@ -426,14 +478,25 @@ namespace Nezia.Unity
             _spawnedSource = src;
             _isPlaying = true;
             _isPaused = false;
-            _hasPrevPosition = false;
 
             if (_useClipDefaults)
             {
-                // Clip 側に spatial / doppler / priority / attenuation を委譲する。
-                // 戻り値の AttenuationCurve は despawn 時に Destroy する責務をここで引き取る。
-                _liveAttenuationCurve = asset.ApplyDefaultsTo(engine, src);
-                if (asset.SpatialBlend > 0f) PushPosition();
+                // per-property override: Source 値 (override flag true) か Clip 値 (false) を選んで適用。
+                int effPriority = _overridePriority ? _priority : asset.Priority;
+                float effSpatialBlend = _overrideSpatial ? _spatialBlend : asset.SpatialBlend;
+                float effMinDistance = _overrideSpatial ? _minDistance : asset.MinDistance;
+                float effMaxDistance = _overrideSpatial ? _maxDistance : asset.MaxDistance;
+                var effRolloff = _overrideSpatial ? _rolloffMode : asset.RolloffMode;
+                float effDoppler = _overrideDoppler ? _dopplerLevel : asset.DopplerLevel;
+                var effCurve = _overrideAttenuation ? _attenuationCurve : asset.AttenuationCurve;
+
+                _liveAttenuationCurve = NeziaSoundAsset.ApplyAcousticsTo(
+                    engine, src,
+                    effPriority, effSpatialBlend, effMinDistance, effMaxDistance,
+                    effRolloff, effCurve, effDoppler);
+                asset.ApplyEffectsAndSendsTo(engine, src);
+
+                if (effSpatialBlend > 0f) PushPosition();
             }
             else
             {
@@ -568,24 +631,21 @@ namespace Nezia.Unity
         private void Start()
         {
             // MixerAsset 優先、未設定 / 未解決なら BusMap に fallback。
-            if (!outputBus.IsValid && _mixerAsset != null && !string.IsNullOrEmpty(_outputBusName))
-                outputBus = _mixerAsset.Resolve(_outputBusName);
+            // _mixerAsset が未指定でも _outputBusName が入っていれば Project Settings の
+            // default mixer を試す（NeziaSettings 経由）。
+            if (!outputBus.IsValid && !string.IsNullOrEmpty(_outputBusName))
+            {
+                var asset = _mixerAsset != null ? _mixerAsset : NeziaSettings.Instance?.DefaultMixer;
+                if (asset != null) outputBus = asset.Resolve(_outputBusName);
+            }
             if (_busMap != null && _outputAudioMixerGroup != null && !outputBus.IsValid)
                 outputBus = _busMap.Resolve(_outputAudioMixerGroup);
 
             if (_playOnAwake && ResolvedSound != null) Play();
         }
 
-        private void LateUpdate()
-        {
-            if (!_isPlaying || _isPaused) return;
-            // useClipDefaults=true のときは Clip 側 spatial 設定をトリガに使う。
-            // false のときは従来どおり Source 側 _spatialBlend を見る。
-            bool spatial = _useClipDefaults
-                ? (ResolvedSound?.SpatialBlend ?? 0f) > 0f
-                : _spatialBlend > 0f;
-            if (spatial) PushPositionAndVelocity();
-        }
+        // 位置 / 速度更新は NeziaSpatialUpdater が TransformAccessArray + Burst Job で
+        // 一括処理するため、各 Source 側で LateUpdate を持たない（per-MB ディスパッチを排除）。
 
         private void OnEnable()
         {
@@ -594,7 +654,7 @@ namespace Nezia.Unity
             _spawnedSource = InvalidEntityId;
             _isPlaying = false;
             _isPaused = false;
-            _hasPrevPosition = false;
+            _spatialIndex = -1;
         }
 
         private void OnDisable() => Stop();
@@ -615,10 +675,21 @@ namespace Nezia.Unity
             _spawnedSource = InvalidEntityId;
             _isPlaying = false;
             _isPaused = false;
+            UnregisterSpatial();
             // 明示 Stop の場合は SourceFinished が発火しないので、ここで Free する。
             FreeSelfHandle();
             DestroyLiveAttenuationCurve();
         }
+
+        private void UnregisterSpatial()
+        {
+            if (_spatialIndex < 0) return;
+            NeziaSpatialUpdater.Unregister(_spatialIndex);
+            _spatialIndex = -1;
+        }
+
+        // NeziaSpatialUpdater の swap-back で自分の index が変わった際の通知。
+        internal void NotifySpatialIndexChanged(int newIndex) => _spatialIndex = newIndex;
 
         private void DestroyLiveAttenuationCurve()
         {
@@ -664,104 +735,19 @@ namespace Nezia.Unity
             _isPlaying = false;
             _isPaused = false;
             _selfHandle = default; // 呼び出し元 (OnNativeFinishedStatic) が Free する。
+            UnregisterSpatial();
             DestroyLiveAttenuationCurve();
 
             if (_destroyOnFinish && this != null) Destroy(gameObject);
         }
 
-        // 速度（Doppler 用）は前フレーム位置との差分を Time.deltaTime で割って自動算出する。
-        // ユーザーが明示的に Rigidbody.velocity 等を渡すフックは現状用意していない。
-        private Vector3 _prevPosition;
-        private bool _hasPrevPosition;
-
+        // 位置 / 速度は NeziaSpatialUpdater 側の Job で transform.position から直接読む。
+        // Spawn 直後の初回登録のみここで行い、以降は updater が毎フレーム並列に処理する。
         private void PushPosition()
         {
             if (!HasLiveSource) return;
-            var p = transform.position;
-            EnqueuePendingPosition(new NeziaSourcePositionUpdate
-            {
-                source = _spawnedSource,
-                position = new NeziaVec3 { x = p.x, y = p.y, z = p.z },
-            });
-        }
-
-        private void PushPositionAndVelocity()
-        {
-            if (!HasLiveSource) return;
-            var p = transform.position;
-            EnqueuePendingPosition(new NeziaSourcePositionUpdate
-            {
-                source = _spawnedSource,
-                position = new NeziaVec3 { x = p.x, y = p.y, z = p.z },
-            });
-
-            var dt = Time.deltaTime;
-            var v = (_hasPrevPosition && dt > 0f) ? (p - _prevPosition) / dt : Vector3.zero;
-            _prevPosition = p;
-            _hasPrevPosition = true;
-            EnqueuePendingVelocity(new NeziaSourceVelocityUpdate
-            {
-                source = _spawnedSource,
-                velocity = new NeziaVec3 { x = v.x, y = v.y, z = v.z },
-            });
-        }
-
-        // ─── 位置更新の一括送信 ──────────────────────────────────
-        //
-        // 各ソースが個別に nezia_source_batch_set_positions を呼ぶと、
-        // 1 フレームに多数のソースがあるとき FFI 越えの回数がそのまま線形に増える。
-        // 同フレーム内の更新は静的バッファへ積み、フレーム末尾の
-        // NeziaEnginePump からまとめて 1 回の FFI 呼び出しで送る。
-
-        private static NeziaSourcePositionUpdate[] s_pendingPositions = new NeziaSourcePositionUpdate[64];
-        private static int s_pendingPositionCount;
-        private static NeziaSourceVelocityUpdate[] s_pendingVelocities = new NeziaSourceVelocityUpdate[64];
-        private static int s_pendingVelocityCount;
-
-        private static void EnqueuePendingPosition(NeziaSourcePositionUpdate update)
-        {
-            if (s_pendingPositionCount == s_pendingPositions.Length)
-                Array.Resize(ref s_pendingPositions, s_pendingPositions.Length * 2);
-            s_pendingPositions[s_pendingPositionCount++] = update;
-        }
-
-        private static void EnqueuePendingVelocity(NeziaSourceVelocityUpdate update)
-        {
-            if (s_pendingVelocityCount == s_pendingVelocities.Length)
-                Array.Resize(ref s_pendingVelocities, s_pendingVelocities.Length * 2);
-            s_pendingVelocities[s_pendingVelocityCount++] = update;
-        }
-
-        internal static unsafe void FlushPendingPositions()
-        {
-            if (!NeziaEngine.IsInitialized)
-            {
-                s_pendingPositionCount = 0;
-                s_pendingVelocityCount = 0;
-                return;
-            }
-
-            if (s_pendingPositionCount > 0)
-            {
-                fixed (NeziaSourcePositionUpdate* ptr = s_pendingPositions)
-                {
-                    var r = LibNezia.nezia_source_batch_set_positions(
-                        NeziaEngine.RequireHandle(), ptr, (nuint)s_pendingPositionCount);
-                    NeziaException.ThrowIfError(r, "batch set source positions");
-                }
-                s_pendingPositionCount = 0;
-            }
-
-            if (s_pendingVelocityCount > 0)
-            {
-                fixed (NeziaSourceVelocityUpdate* ptr = s_pendingVelocities)
-                {
-                    var r = LibNezia.nezia_source_batch_set_velocities(
-                        NeziaEngine.RequireHandle(), ptr, (nuint)s_pendingVelocityCount);
-                    NeziaException.ThrowIfError(r, "batch set source velocities");
-                }
-                s_pendingVelocityCount = 0;
-            }
+            if (_spatialIndex >= 0) return; // 二重登録防止
+            _spatialIndex = NeziaSpatialUpdater.Register(this, transform, _spawnedSource);
         }
     }
 }

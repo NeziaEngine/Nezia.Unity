@@ -12,10 +12,11 @@ namespace Nezia.Unity
     {
         private void LateUpdate()
         {
-            // 各 NeziaAudioSource.LateUpdate で積まれた位置更新を 1 回の FFI 呼び出しで流し込む。
+            // NeziaSpatialUpdater が TransformAccessArray + Burst Job で
+            // 全 spatial source の position/velocity を並列収集し、1 回の FFI で送る。
             // この pump は DefaultExecutionOrder=int.MaxValue で最後に走るため、
-            // 同フレーム内のすべての PushPosition がここまでに完了している。
-            NeziaAudioSource.FlushPendingPositions();
+            // 同フレーム内のすべての Register / Unregister がここまでに完了している。
+            NeziaSpatialUpdater.Flush();
             NeziaEngine.PollEvents();
             NeziaAudioListener.PushActiveListener();
         }

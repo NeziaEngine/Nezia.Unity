@@ -1,13 +1,12 @@
 {
-  "name": "jp.nezia.unity.Runtime",
-  "rootNamespace": "Nezia.Unity",
+  "name": "jp.nezia.unity.Samples.ClipCentricBasics",
+  "rootNamespace": "Nezia.Unity.Samples.ClipCentricBasics",
   "references": [
-    "Unity.Burst",
-    "Unity.Collections"
+    "jp.nezia.unity.Runtime"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
-  "allowUnsafeCode": true,
+  "allowUnsafeCode": false,
   "overrideReferences": false,
   "precompiledReferences": [],
   "autoReferenced": true,
