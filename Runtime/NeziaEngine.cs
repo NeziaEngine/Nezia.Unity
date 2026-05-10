@@ -20,6 +20,11 @@ namespace Nezia.Unity
         private static GameObject s_pumpObject;
         private static int s_generation;
 
+        // ユーザーが <see cref="MasterVolume"/> 経由で設定した値。
+        private static float s_userMasterVolume = 1.0f;
+        // 外部 (Editor の Game View ミュート等) からのスケール。実効値 = user × scale。
+        private static float s_masterVolumeScale = 1.0f;
+
         /// <summary>エンジンが初期化済みか。</summary>
         public static bool IsInitialized => s_initialized;
 
@@ -58,6 +63,10 @@ namespace Nezia.Unity
             s_initialized = true;
             s_generation++;
 
+            // 直近のユーザー設定値 × スケールを再適用 (ドメインリロード後の復帰や、
+            // Editor 側ブリッジが Initialize 前に scale を書き込んでいた場合に効く)。
+            ApplyEffectiveMasterVolume();
+
             s_pumpObject = new GameObject("[Nezia Engine Pump]") { hideFlags = HideFlags.HideAndDontSave };
             UnityEngine.Object.DontDestroyOnLoad(s_pumpObject);
             s_pumpObject.AddComponent<NeziaEnginePump>();
@@ -86,14 +95,39 @@ namespace Nezia.Unity
             s_handle = null;
         }
 
-        /// <summary>マスター音量（0.0〜1.0、自動クランプ）。</summary>
+        /// <summary>
+        /// マスター音量（0.0〜1.0、自動クランプ）。
+        /// <para>
+        /// 内部では Editor の Game View ミュート等による外部スケールと積算した実効値を
+        /// ネイティブへ送る。ユーザーがここに設定した値はそのまま保持される。
+        /// </para>
+        /// </summary>
         public static unsafe float MasterVolume
         {
             set
             {
-                var r = LibNezia.nezia_engine_set_volume(RequireHandle(), value);
-                NeziaException.ThrowIfError(r, "set master volume");
+                s_userMasterVolume = value;
+                ApplyEffectiveMasterVolume();
             }
+        }
+
+        /// <summary>
+        /// 外部 (Editor の Game View ミュート等) から master volume にかける乗数を設定する。
+        /// <see cref="MasterVolume"/> のユーザー設定値は保持したまま実効値だけを変える。
+        /// エンジン未初期化でも呼べる (値だけ覚えて Initialize 時に適用)。
+        /// </summary>
+        internal static void SetMasterVolumeScale(float scale)
+        {
+            s_masterVolumeScale = scale;
+            if (s_initialized) ApplyEffectiveMasterVolume();
+        }
+
+        private static unsafe void ApplyEffectiveMasterVolume()
+        {
+            if (!s_initialized) return;
+            var effective = s_userMasterVolume * s_masterVolumeScale;
+            var r = LibNezia.nezia_engine_set_volume(RequireHandle(), effective);
+            NeziaException.ThrowIfError(r, "set master volume");
         }
 
         /// <summary>すべてのボイスを停止する。</summary>
