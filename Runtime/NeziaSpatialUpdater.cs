@@ -28,7 +28,7 @@ namespace Nezia.Unity
     /// <see cref="NativeArray{T}"/> から直接 FFI に渡す。
     /// </para>
     /// </summary>
-    internal static unsafe class NeziaSpatialUpdater
+    internal static class NeziaSpatialUpdater
     {
         // 1 エントリ分の job 内状態。`prevPos` / `hasPrev` は Job 内で更新される。
         internal struct EntryData
@@ -122,7 +122,7 @@ namespace Nezia.Unity
         /// Job を実行し、結果を 1 回の FFI 呼び出しでネイティブへ送る。
         /// <see cref="NeziaEnginePump.LateUpdate"/> から呼ばれる想定。
         /// </summary>
-        internal static void Flush()
+        internal static unsafe void Flush()
         {
             if (s_count == 0) return;
             if (!NeziaEngine.IsInitialized) return;
