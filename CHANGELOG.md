@@ -9,6 +9,12 @@
 
 ### Added
 
+- **IP-4 PR-D ドキュメント刷新 + サンプル追加** — Clip-centric authoring の
+  浸透を完了。`Samples~/ClipCentricBasics/` を新設し、Package Manager の
+  Samples から取り込める最小サンプル 3 本 (Simple Playback / Volume Pitch
+  Scaling / Source Override) を提供。`package.json` に `samples` 宣言を
+  追加し、README にも Clip-centric の最小コード例を掲載。
+
 - **IP-12 PR-E ドキュメント整備** — `NeziaMixerInspector` (Buses / Effects /
   Sends タブ) の使い方・Compressor sidechain (ducking) の組み立て手順・
   バリデーション・Undo / Redo の挙動を [`docs~/mixer-authoring.md`](docs~/mixer-authoring.md)

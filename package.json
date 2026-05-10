@@ -8,5 +8,12 @@
     "name": "Nezia",
     "email": "kaido_atsuya@atsuatsu.dev"
   },
-  "dependencies": {}
+  "dependencies": {},
+  "samples": [
+    {
+      "displayName": "Clip-centric Basics",
+      "description": "Clip-centric authoring を最小コードで体験するサンプル (Simple Playback / Volume Pitch Scaling / Source Override)。",
+      "path": "Samples~/ClipCentricBasics"
+    }
+  ]
 }
