@@ -56,9 +56,29 @@ namespace Nezia.Unity
         {
             if (s_initialized) return;
 
-            s_handle = LibNezia.nezia_engine_new();
-            if (s_handle == null)
-                throw new InvalidOperationException("[Nezia] nezia_engine_new returned NULL");
+            var settings = NeziaSettings.Instance;
+            if (settings != null && settings.OverrideEngineConfig)
+            {
+                // ビルド既定値をテンプレートとして取得し、ユーザー設定で上書きしてから渡す。
+                // 将来 EngineConfig にフィールドが増えても既定値が拾われる安全策。
+                NeziaEngineConfig cfg;
+                var rd = LibNezia.nezia_engine_config_default(&cfg);
+                NeziaException.ThrowIfError(rd, "engine config default");
+                cfg.max_sources = settings.MaxSources;
+                cfg.max_physical_voices = settings.MaxPhysicalVoices;
+                s_handle = LibNezia.nezia_engine_new_with_config(&cfg);
+                if (s_handle == null)
+                    throw new InvalidOperationException(
+                        $"[Nezia] nezia_engine_new_with_config returned NULL " +
+                        $"(max_sources={cfg.max_sources}, max_physical_voices={cfg.max_physical_voices}). " +
+                        "max_physical_voices <= max_sources かつ両者 >= 1 を満たす必要があります。");
+            }
+            else
+            {
+                s_handle = LibNezia.nezia_engine_new();
+                if (s_handle == null)
+                    throw new InvalidOperationException("[Nezia] nezia_engine_new returned NULL");
+            }
 
             s_initialized = true;
             s_generation++;

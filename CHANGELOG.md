@@ -17,6 +17,13 @@
 
 ### Added
 
+- **Project Settings からエンジンキャパシティを上書き可能に** —
+  `Project Settings > Nezia` に `Override Engine Config` トグルと
+  `Max Sources` / `Max Physical Voices` (= 同時発音数上限) を追加した。
+  ON にすると `nezia_engine_new_with_config` 経由で初期化され、OFF なら
+  従来どおり nezia-core ビルドの既定値が使われる。`max_physical_voices <=
+  max_sources` の制約は `OnValidate` で自動補正する。
+
 - **`NeziaAudioSource.StopMany(...)`** — 複数ソースのバルク停止 API。
   新 FFI `nezia_source_stop_many` を経由し、ステージ終端などで多数のボイスを
   まとめて止めるときに SPSC コマンドリングの詰まりを回避する（個別 `Stop` を
