@@ -27,10 +27,7 @@ namespace Nezia.Unity
         // ─── Inspector 公開 ──────────────────────────────────────
 
         // 鳴らす対象。NeziaAudioClip / NeziaRandomContainer など NeziaSoundAsset 派生を受ける。
-        // 旧フィールド `_clip` (NeziaAudioClip 型) は AudioSource 互換性維持のため残し、
-        // 値が入っている場合は `_sound` 側にコピーされて優先される (`Reset` / Play 時)。
         [SerializeField] private NeziaSoundAsset _sound;
-        [SerializeField] private NeziaAudioClip _clip;
         [SerializeField, Range(0f, 1f)] private float _volume = 1f;
         [SerializeField, Range(-3f, 3f)] private float _pitch = 1f;
         [SerializeField] private bool _loop;
@@ -128,23 +125,9 @@ namespace Nezia.Unity
         /// </summary>
         public NeziaSoundAsset sound
         {
-            get => _sound != null ? _sound : _clip;
-            set
-            {
-                _sound = value;
-                _clip = value as NeziaAudioClip; // 互換 getter のために sync
-            }
+            get => _sound;
+            set => _sound = value;
         }
-
-        /// <summary>再生対象クリップ。<c>AudioSource.clip</c> 互換（旧シグネチャ）。</summary>
-        public NeziaAudioClip clip
-        {
-            get => _sound as NeziaAudioClip ?? _clip;
-            set { _clip = value; if (value != null) _sound = value; }
-        }
-
-        // 内部用: 現在 dispatch 対象のアセットを返す。`_sound` が優先で、未設定なら旧 `_clip`。
-        private NeziaSoundAsset ResolvedSound => _sound != null ? _sound : _clip;
 
         /// <summary>
         /// Clip-centric モード切替。<c>true</c> なら音響設定を sound asset に委譲する。
@@ -156,14 +139,14 @@ namespace Nezia.Unity
         private float ClipVolume()
         {
             if (!_useClipDefaults) return 1f;
-            var s = ResolvedSound;
+            var s = _sound;
             return s != null ? s.Volume : 1f;
         }
 
         private float ClipPitch()
         {
             if (!_useClipDefaults) return 1f;
-            var s = ResolvedSound;
+            var s = _sound;
             return s != null ? s.Pitch : 1f;
         }
 
@@ -409,14 +392,14 @@ namespace Nezia.Unity
                 var r = LibNezia.nezia_source_get_position(
                     NeziaEngine.RequireHandle(), _spawnedSource, &frames);
                 if (r != NeziaResult.Ok) return 0f;
-                var asset = ResolvedSound;
+                var asset = _sound;
                 int sr = (asset != null && asset.SampleRate > 0) ? asset.SampleRate : 44100;
                 return frames / sr;
             }
             set
             {
                 if (!HasLiveSource) return;
-                var asset = ResolvedSound;
+                var asset = _sound;
                 int sr = (asset != null && asset.SampleRate > 0) ? asset.SampleRate : 44100;
                 var r = LibNezia.nezia_source_seek(
                     NeziaEngine.RequireHandle(), _spawnedSource, value * sr);
@@ -427,7 +410,7 @@ namespace Nezia.Unity
         /// <summary>クリップ／コンテナを再生する。<c>AudioSource.Play()</c> 互換。</summary>
         public unsafe void Play()
         {
-            var asset = ResolvedSound;
+            var asset = _sound;
             if (asset == null) return;
 
             // 既存ソースがあれば停止してから新規 spawn する（AudioSource.Play の再起動セマンティクス）
@@ -715,14 +698,14 @@ namespace Nezia.Unity
             NeziaException.ThrowIfError(r, "source set attenuation curve");
         }
 
-        /// <summary>位置指定でクリップを 1 回再生する。<c>AudioSource.PlayClipAtPoint</c> 互換。</summary>
-        public static void PlayClipAtPoint(NeziaAudioClip clip, Vector3 position, float volume = 1f)
+        /// <summary>位置指定で sound asset を 1 回再生する。<c>AudioSource.PlayClipAtPoint</c> 互換。</summary>
+        public static void PlayClipAtPoint(NeziaSoundAsset sound, Vector3 position, float volume = 1f)
         {
-            if (clip == null) return;
+            if (sound == null) return;
             var go = new GameObject("[Nezia OneShot]");
             go.transform.position = position;
             var src = go.AddComponent<NeziaAudioSource>();
-            src._clip = clip;
+            src._sound = sound;
             src._volume = volume;
             src._spatialBlend = 1f;
             src._playOnAwake = false;
@@ -747,7 +730,7 @@ namespace Nezia.Unity
             if (_busMap != null && _outputAudioMixerGroup != null && !outputBus.IsValid)
                 outputBus = _busMap.Resolve(_outputAudioMixerGroup);
 
-            if (_playOnAwake && ResolvedSound != null) Play();
+            if (_playOnAwake && _sound != null) Play();
         }
 
         // 位置 / 速度更新は NeziaSpatialUpdater が TransformAccessArray + Burst Job で

@@ -23,7 +23,7 @@ namespace Nezia.Unity.Editor
     public sealed class NeziaAudioSourceEditor : UnityEditor.Editor
     {
         // Sound + mode
-        private SerializedProperty _sound, _clip, _useClipDefaults;
+        private SerializedProperty _sound, _useClipDefaults;
         // Playback
         private SerializedProperty _volume, _pitch, _loop, _mute, _playOnAwake;
         // Spatial group
@@ -38,7 +38,6 @@ namespace Nezia.Unity.Editor
         private void OnEnable()
         {
             _sound = serializedObject.FindProperty("_sound");
-            _clip = serializedObject.FindProperty("_clip");
             _useClipDefaults = serializedObject.FindProperty("_useClipDefaults");
             _volume = serializedObject.FindProperty("_volume");
             _pitch = serializedObject.FindProperty("_pitch");
@@ -70,9 +69,6 @@ namespace Nezia.Unity.Editor
 
             // ── Sound asset ──────────────────────────────────────
             EditorGUILayout.PropertyField(_sound, new GUIContent("Sound"));
-            // 旧 _clip は _sound 未設定時のみ表示（互換性維持）
-            if (_sound.objectReferenceValue == null)
-                EditorGUILayout.PropertyField(_clip, new GUIContent("Clip (legacy)"));
 
             EditorGUILayout.Space(4);
 
@@ -144,8 +140,7 @@ namespace Nezia.Unity.Editor
 
         private NeziaSoundAsset ResolveAsset()
         {
-            var asset = _sound.objectReferenceValue as NeziaSoundAsset;
-            return asset ?? (_clip.objectReferenceValue as NeziaSoundAsset);
+            return _sound.objectReferenceValue as NeziaSoundAsset;
         }
 
         private static string FormatClipBus(NeziaSoundAsset a)

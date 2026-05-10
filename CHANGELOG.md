@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **`NeziaAudioSource._clip` / `NeziaAudioSource.clip` プロパティを削除**。
+  再生対象は `_sound` (`NeziaSoundAsset`) ひとつに統一した。`NeziaAudioClip` は
+  `NeziaSoundAsset` の派生のままなので、`source.sound = audioClip;` でそのまま
+  代入できる。`PlayClipAtPoint` の引数も `NeziaSoundAsset` に変更
+  （`NeziaAudioClip` は派生のため呼び出しコードの変更不要）。
+
 ### Added
 
 - **`NeziaAudioSource.StopMany(...)`** — 複数ソースのバルク停止 API。

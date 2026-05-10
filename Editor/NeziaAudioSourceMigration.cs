@@ -67,8 +67,7 @@ namespace Nezia.Unity.Editor
             var so = new SerializedObject(src);
             so.FindProperty("_useClipDefaults").boolValue = true;
 
-            // Asset 参照は _sound 優先、未設定時は legacy _clip。両方 null なら
-            // Clip 値との比較ができないので「全 override ON」で挙動保存する。
+            // Asset 参照が無いときは Clip 値との比較ができないので「全 override ON」で挙動保存する。
             var asset = ResolveAsset(so);
 
             so.FindProperty("_overrideLoop").boolValue = !LoopMatches(src, asset);
@@ -121,8 +120,7 @@ namespace Nezia.Unity.Editor
 
         private static NeziaSoundAsset ResolveAsset(SerializedObject so)
         {
-            var s = so.FindProperty("_sound").objectReferenceValue as NeziaSoundAsset;
-            return s ?? (so.FindProperty("_clip").objectReferenceValue as NeziaSoundAsset);
+            return so.FindProperty("_sound").objectReferenceValue as NeziaSoundAsset;
         }
 
         private static IEnumerable<GameObject> IterateSelectedRoots()
