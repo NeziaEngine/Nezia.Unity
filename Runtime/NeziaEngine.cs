@@ -223,7 +223,8 @@ namespace Nezia.Unity
                 RequireHandle(),
                 &d.VoiceSteal,
                 &d.Underrun,
-                &d.DroppedPlayCalls);
+                &d.DroppedPlayCalls,
+                &d.CommandQueueFull);
             NeziaException.ThrowIfError(r, "get dropouts");
             return d;
         }
@@ -278,5 +279,11 @@ namespace Nezia.Unity
         public ulong Underrun;
         /// <summary><c>MAX_SOURCES</c> 上限到達による Play コマンド失敗の累積回数。</summary>
         public ulong DroppedPlayCalls;
+        /// <summary>
+        /// SPSC コマンドリングが満杯で <c>try_push</c> が失敗した累積回数。
+        /// <see cref="DroppedPlayCalls"/> (= <c>MAX_SOURCES</c> 到達) と原因が異なり、
+        /// 1 フレームで API バーストして audio thread が drain する前にリングが詰まったケースを示す。
+        /// </summary>
+        public ulong CommandQueueFull;
     }
 }

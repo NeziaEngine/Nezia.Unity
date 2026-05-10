@@ -468,9 +468,51 @@ namespace Nezia.Unity
                 cb = (delegate* unmanaged[Cdecl]<void*, void>)s_finishCallbackPtr;
             }
 
-            var src = asset.Spawn(engine, effectiveVolume, effectivePitch, busId, effectiveLoop, cb, userData);
+            // ── spawn 同梱 priority / spatial を組み立て ────────────
+            //
+            // useClipDefaults: per-property override で Source 値 / Clip 値を選ぶ。
+            // legacy: Source 側の値をそのまま使う。
+            int effPriority;
+            float effSpatialBlend;
+            float effMinDistance;
+            float effMaxDistance;
+            NeziaRolloffMode effRolloff;
+            float effDoppler;
+            NeziaAttenuationCurveAsset effCurve;
+            if (_useClipDefaults)
+            {
+                effPriority = _overridePriority ? _priority : asset.Priority;
+                effSpatialBlend = _overrideSpatial ? _spatialBlend : asset.SpatialBlend;
+                effMinDistance = _overrideSpatial ? _minDistance : asset.MinDistance;
+                effMaxDistance = _overrideSpatial ? _maxDistance : asset.MaxDistance;
+                effRolloff = _overrideSpatial ? _rolloffMode : asset.RolloffMode;
+                effDoppler = _overrideDoppler ? _dopplerLevel : asset.DopplerLevel;
+                effCurve = _overrideAttenuation ? _attenuationCurve : asset.AttenuationCurve;
+            }
+            else
+            {
+                effPriority = _priority;
+                effSpatialBlend = _spatialBlend;
+                effMinDistance = _minDistance;
+                effMaxDistance = _maxDistance;
+                effRolloff = _rolloffMode;
+                effDoppler = _dopplerLevel;
+                effCurve = _attenuationCurve;
+            }
+
+            byte nativePriority = NeziaSoundAsset.ToNativePriority(effPriority);
+            NeziaAttenuationCurve liveCurve;
+            var spatialInit = NeziaSoundAsset.BuildSpawnSpatialInit(
+                effSpatialBlend, effMinDistance, effMaxDistance,
+                effRolloff, effCurve, effDoppler, out liveCurve);
+
+            var src = asset.Spawn(
+                engine, effectiveVolume, effectivePitch, busId, effectiveLoop,
+                nativePriority, spatialInit, cb, userData);
             if (src.index == uint.MaxValue)
             {
+                // SPSC リング満杯または MAX_SOURCES 到達。確保済み curve を解放してから return。
+                if (liveCurve.IsValid) liveCurve.Destroy();
                 FreeSelfHandle();
                 return; // INVALID
             }
@@ -478,62 +520,49 @@ namespace Nezia.Unity
             _spawnedSource = src;
             _isPlaying = true;
             _isPaused = false;
+            _liveAttenuationCurve = liveCurve;
 
-            if (_useClipDefaults)
+            if (asset.SpawnAcousticsBundled)
             {
-                // per-property override: Source 値 (override flag true) か Clip 値 (false) を選んで適用。
-                int effPriority = _overridePriority ? _priority : asset.Priority;
-                float effSpatialBlend = _overrideSpatial ? _spatialBlend : asset.SpatialBlend;
-                float effMinDistance = _overrideSpatial ? _minDistance : asset.MinDistance;
-                float effMaxDistance = _overrideSpatial ? _maxDistance : asset.MaxDistance;
-                var effRolloff = _overrideSpatial ? _rolloffMode : asset.RolloffMode;
-                float effDoppler = _overrideDoppler ? _dopplerLevel : asset.DopplerLevel;
-                var effCurve = _overrideAttenuation ? _attenuationCurve : asset.AttenuationCurve;
-
-                _liveAttenuationCurve = NeziaSoundAsset.ApplyAcousticsTo(
-                    engine, src,
-                    effPriority, effSpatialBlend, effMinDistance, effMaxDistance,
-                    effRolloff, effCurve, effDoppler);
-                asset.ApplyEffectsAndSendsTo(engine, src);
-
+                // priority / spatial / doppler / curve は spawn コマンドに同梱済み。
+                // effects / sends と 3D 位置のみここで push する。
+                if (_useClipDefaults)
+                    asset.ApplyEffectsAndSendsTo(engine, src);
                 if (effSpatialBlend > 0f) PushPosition();
             }
             else
             {
-                // 互換モード: Source 側の値で priority / spatial を設定する従来挙動。
-                var prResult = LibNezia.nezia_source_set_priority(
-                    engine, src, ToNativePriority(_priority));
+                // Container 経路: FFI が同梱未対応のため従来通り個別 push。
+                var prResult = LibNezia.nezia_source_set_priority(engine, src, nativePriority);
                 NeziaException.ThrowIfError(prResult, "set source priority");
 
-                if (_spatialBlend > 0f)
+                if (effSpatialBlend > 0f)
                 {
                     var r = LibNezia.nezia_source_set_spatial_params(
-                        engine, src, _rolloffMode.ToNative(), _minDistance, _maxDistance, 1f);
+                        engine, src, effRolloff.ToNative(), effMinDistance, effMaxDistance, 1f);
                     NeziaException.ThrowIfError(r, "set spatial params");
 
                     r = LibNezia.nezia_source_set_spatial_enabled(engine, src, 1);
                     NeziaException.ThrowIfError(r, "set spatial enabled");
 
-                    r = LibNezia.nezia_source_set_doppler_level(engine, src, _dopplerLevel);
+                    r = LibNezia.nezia_source_set_doppler_level(engine, src, effDoppler);
                     NeziaException.ThrowIfError(r, "set source doppler level");
 
-                    if (_attenuationCurve != null)
+                    if (liveCurve.IsValid)
                     {
-                        _liveAttenuationCurve = _attenuationCurve.ToNative();
-                        if (_liveAttenuationCurve.IsValid)
-                        {
-                            var cr = LibNezia.nezia_source_set_attenuation_curve(
-                                engine, src, _liveAttenuationCurve.Id);
-                            NeziaException.ThrowIfError(cr, "set source attenuation curve");
-                        }
+                        var cr = LibNezia.nezia_source_set_attenuation_curve(
+                            engine, src, liveCurve.Id);
+                        NeziaException.ThrowIfError(cr, "set source attenuation curve");
                     }
 
+                    if (_useClipDefaults) asset.ApplyEffectsAndSendsTo(engine, src);
                     PushPosition();
                 }
                 else
                 {
                     var r = LibNezia.nezia_source_set_spatial_enabled(engine, src, 0);
                     NeziaException.ThrowIfError(r, "set spatial disabled");
+                    if (_useClipDefaults) asset.ApplyEffectsAndSendsTo(engine, src);
                 }
             }
         }

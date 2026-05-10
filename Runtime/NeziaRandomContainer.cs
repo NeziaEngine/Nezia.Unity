@@ -56,10 +56,15 @@ namespace Nezia.Unity
 
         internal override bool SupportsFinishCallback => true;
 
+        // Container 経路の FFI (`nezia_container_play_with_handle`) は priority / spatial_init の
+        // 同梱に未対応のため、これらは Spawn では無視し、呼出側で従来通り
+        // `ApplyAcousticsTo` 経由で個別 push する必要がある。
         internal override unsafe NeziaEntityId Spawn(
             Nezia.Native.NeziaEngine* engineHandle,
             float volume, float pitch,
             NeziaEntityId bus, bool looping,
+            byte nativePriority,
+            NeziaSpawnSpatialInit spatialInit,
             delegate* unmanaged[Cdecl]<void*, void> callback, void* userData)
         {
             if (!_resolved) Resolve(engineHandle);

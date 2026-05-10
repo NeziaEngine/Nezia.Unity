@@ -284,15 +284,87 @@ namespace Nezia.Unity
         /// <para>
         /// ここで渡す <paramref name="volume"/> / <paramref name="pitch"/> /
         /// <paramref name="bus"/> / <paramref name="looping"/> は <see cref="NeziaAudioSource"/>
-        /// 側で Clip-side デフォルトと合成済みの「最終値」。spatial / doppler / priority /
-        /// attenuation 系は spawn 後に <see cref="ApplyDefaultsTo"/> 経由で push される。
+        /// 側で Clip-side デフォルトと合成済みの「最終値」。
+        /// </para>
+        ///
+        /// <para>
+        /// <paramref name="nativePriority"/> / <paramref name="spatialInit"/> はネイティブ表現に
+        /// 整形済みの spawn 同梱パラメータ。<see cref="SpawnAcousticsBundled"/> が
+        /// <c>true</c> の経路（AudioClip）では FFI 1 コマンドで送られ、4〜5 個の post-spawn
+        /// FFI を消費しなくなる。<c>false</c> の経路（Container）では従来通り
+        /// <see cref="ApplyAcousticsTo"/> 経由で個別 push される必要がある。
         /// </para>
         /// </summary>
         internal abstract unsafe NeziaEntityId Spawn(
             Nezia.Native.NeziaEngine* engine,
             float volume, float pitch,
             NeziaEntityId bus, bool looping,
+            byte nativePriority,
+            NeziaSpawnSpatialInit spatialInit,
             delegate* unmanaged[Cdecl]<void*, void> callback, void* userData);
+
+        /// <summary>
+        /// <see cref="Spawn"/> が priority / spatial 系パラメータを spawn コマンドに同梱できるか。
+        /// AudioClip 経路は <c>true</c>。Container 経路は FFI が未拡張のため <c>false</c>
+        /// （呼出側は spawn 後に <see cref="ApplyAcousticsTo"/> を呼ぶ必要がある）。
+        /// </summary>
+        internal virtual bool SpawnAcousticsBundled => false;
+
+        /// <summary>
+        /// Unity 表現の優先度 (0=最高 / 255=最低) → ネイティブ表現 (高い値=高優先) への変換。
+        /// </summary>
+        internal static byte ToNativePriority(int unityPriority)
+            => (byte)(255 - Mathf.Clamp(unityPriority, 0, 255));
+
+        /// <summary>
+        /// Spawn 同梱用の <see cref="NeziaSpawnSpatialInit"/> を組み立てる。
+        ///
+        /// <para>
+        /// <paramref name="attenuationCurve"/> が指定されているとき、ここで <c>ToNative()</c> を
+        /// 呼んでネイティブ curve を確保し、<paramref name="liveCurve"/> に返す。spawn 経路に
+        /// 同梱するか個別 push するかを問わず curve のライフタイム管理は呼出側が担う。
+        /// </para>
+        /// </summary>
+        internal static NeziaSpawnSpatialInit BuildSpawnSpatialInit(
+            float spatialBlend,
+            float minDistance,
+            float maxDistance,
+            NeziaRolloffMode rolloffMode,
+            NeziaAttenuationCurveAsset attenuationCurve,
+            float dopplerLevel,
+            out NeziaAttenuationCurve liveCurve)
+        {
+            liveCurve = NeziaAttenuationCurve.Invalid;
+            var init = new NeziaSpawnSpatialInit
+            {
+                enabled = 0,
+                _pad0 = 0,
+                _pad1 = 0,
+                model = NeziaAttenuationModel.None,
+                min_distance = 0f,
+                max_distance = 0f,
+                rolloff = 1f,
+                doppler_level = 0f,
+                curve_index = uint.MaxValue,
+            };
+
+            if (spatialBlend <= 0f) return init;
+
+            init.enabled = 1;
+            init.model = rolloffMode.ToNative();
+            init.min_distance = minDistance;
+            init.max_distance = maxDistance;
+            init.rolloff = 1f;
+            init.doppler_level = dopplerLevel;
+
+            if (attenuationCurve != null)
+            {
+                liveCurve = attenuationCurve.ToNative();
+                if (liveCurve.IsValid)
+                    init.curve_index = liveCurve.Id.index;
+            }
+            return init;
+        }
 
         /// <summary>
         /// Container 経路かどうか。<see cref="NeziaAudioSource"/> 側で
