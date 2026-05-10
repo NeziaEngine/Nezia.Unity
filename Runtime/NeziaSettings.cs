@@ -35,6 +35,42 @@ namespace Nezia.Unity
         /// <summary>プロジェクト既定の <see cref="NeziaMixerAsset"/>。未設定なら <c>null</c>。</summary>
         public NeziaMixerAsset DefaultMixer => _defaultMixer;
 
+        // ─── Engine Config ────────────────────────────────────────
+
+        [SerializeField, Tooltip(
+            "ON にするとエンジン初期化時のキャパシティ (最大ソース数 / 最大物理ボイス数) を " +
+            "ここで上書きする。OFF なら nezia-core ビルドの既定値が使われる。")]
+        private bool _overrideEngineConfig = false;
+
+        [SerializeField, Min(1), Tooltip(
+            "論理ソース上限。同時に存在しうる Source の総数 (仮想化されたものを含む)。" +
+            "max_physical_voices 以上である必要がある。")]
+        private uint _maxSources = 1024;
+
+        [SerializeField, Min(1), Tooltip(
+            "物理ボイス数上限。実 DSP / ミキシングを行うボイス数。" +
+            "max_sources 以下である必要がある。発音数 (同時に音が鳴る数) の上限はこの値で決まる。")]
+        private uint _maxPhysicalVoices = 256;
+
+        /// <summary>
+        /// エンジン初期化時のキャパシティをこの設定で上書きするかどうか。
+        /// <c>false</c> なら nezia-core ビルドの既定値が使われる。
+        /// </summary>
+        public bool OverrideEngineConfig => _overrideEngineConfig;
+
+        /// <summary>論理ソース上限。<see cref="OverrideEngineConfig"/> が <c>true</c> のときのみ有効。</summary>
+        public uint MaxSources => _maxSources;
+
+        /// <summary>物理ボイス上限 (= 同時発音数の上限)。<see cref="OverrideEngineConfig"/> が <c>true</c> のときのみ有効。</summary>
+        public uint MaxPhysicalVoices => _maxPhysicalVoices;
+
+        private void OnValidate()
+        {
+            if (_maxSources < 1) _maxSources = 1;
+            if (_maxPhysicalVoices < 1) _maxPhysicalVoices = 1;
+            if (_maxPhysicalVoices > _maxSources) _maxPhysicalVoices = _maxSources;
+        }
+
         // ─── Singleton ────────────────────────────────────────────
 
         private static NeziaSettings s_instance;
