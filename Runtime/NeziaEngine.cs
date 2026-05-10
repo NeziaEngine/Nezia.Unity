@@ -79,6 +79,9 @@ namespace Nezia.Unity
                 s_pumpObject = null;
             }
 
+            // spatial updater の NativeArray / TransformAccessArray を解放する。
+            NeziaSpatialUpdater.Shutdown();
+
             LibNezia.nezia_engine_free(s_handle);
             s_handle = null;
         }

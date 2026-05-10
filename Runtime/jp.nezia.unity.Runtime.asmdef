@@ -1,7 +1,10 @@
 {
   "name": "jp.nezia.unity.Runtime",
   "rootNamespace": "Nezia.Unity",
-  "references": [],
+  "references": [
+    "Unity.Burst",
+    "Unity.Collections"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": true,
