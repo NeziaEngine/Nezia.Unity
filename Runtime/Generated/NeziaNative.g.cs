@@ -100,9 +100,12 @@ namespace Nezia.Native
         ///    ベンチマーク観点では「mix されなかった voice-frame の数」と読める。
         ///  - `out_underrun`: ストリーミングバッファ underrun の累積発生回数。
         ///  - `out_dropped_play_calls`: `MAX_SOURCES` 上限到達による Play コマンド失敗の累積回数。
+        ///  - `out_command_queue_full`: SPSC コマンドリングが満杯で `try_push` が失敗した累積回数。
+        ///    `dropped_play_calls` (= MAX_SOURCES 到達) と原因が異なる: 1 フレームで API バーストし
+        ///    audio thread が drain する前にリングが詰まったケースを示す。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_engine_get_dropouts", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern NeziaResult nezia_engine_get_dropouts(NeziaEngine* engine, ulong* out_voice_steal, ulong* out_underrun, ulong* out_dropped_play_calls);
+        internal static extern NeziaResult nezia_engine_get_dropouts(NeziaEngine* engine, ulong* out_voice_steal, ulong* out_underrun, ulong* out_dropped_play_calls, ulong* out_command_queue_full);
 
         /// <summary>
         ///  オーディオファイルをロードしてハンドルを返す。失敗時は `INVALID` を返す。
@@ -236,12 +239,22 @@ namespace Nezia.Native
         ///  `nezia_source_stop()` で despawn され、その時点で EntityId は無効化される。
         ///  再生し直す場合は再度この関数を呼んで新しい EntityId を取得する。
         ///
+        ///  `priority` / `spatial_init` は spawn 時に `Command::SpawnSource` に同梱して 1 コマンドで
+        ///  送る。3D ソース 1 ボイスあたり 4〜5 コマンドを消費していた旧経路 (spawn 後に
+        ///  `set_priority` / `set_spatial_params` / `set_doppler_level` / `set_spatial_enabled` を
+        ///  個別 push) を置き換える。`spatial_init.enabled = 0` の 2D ソースで spatial 系
+        ///  プロパティはダミー値で構わない。
+        ///
         ///  `callback` が `Some` のとき、自然終了時に `nezia_engine_poll_events()` 経由で
         ///  1 度だけ呼ばれる（`looping != 0` の場合は呼ばれない）。`user_data` のライフタイムは
         ///  コールバック発火まで呼出側が保証する。
+        ///
+        ///  失敗時 (バッファ不正・MAX_SOURCES 到達・**コマンドリング満杯**) は `INVALID` を返す。
+        ///  リング満杯のケースは `nezia_engine_get_dropouts` の `out_command_queue_full` で
+        ///  観測できる。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "nezia_source_play_with_handle", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern NeziaEntityId nezia_source_play_with_handle(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus, byte looping, delegate* unmanaged[Cdecl]<void*, void> callback, void* user_data);
+        internal static extern NeziaEntityId nezia_source_play_with_handle(NeziaEngine* engine, NeziaBufferId buffer, float volume, float pitch, NeziaEntityId bus, byte looping, byte priority, NeziaSpawnSpatialInit spatial_init, delegate* unmanaged[Cdecl]<void*, void> callback, void* user_data);
 
         /// <summary>
         ///  既存ソースのループフラグを動的に変更する。
@@ -802,6 +815,47 @@ namespace Nezia.Native
         public float x;
         public float y;
         public float z;
+    }
+
+    /// <summary>
+    ///  `nezia_source_play_with_handle` に渡す spawn 時の spatial 初期化パラメータ。
+    ///
+    ///  旧経路は spawn 後に `set_priority` / `set_spatial_params` / `set_doppler_level` /
+    ///  `set_attenuation_curve` を個別 FFI 呼び出しで送るため、1 ボイスあたり最大 4〜5 個の
+    ///  SPSC コマンドを消費していた。本構造体に同梱して 1 コマンドで済ませることで、
+    ///  1 フレーム内のバースト Play (例: 群衆・弾幕) でリングが詰まる問題を構造的に解消する。
+    ///
+    ///  `enabled = 0` (= 2D) のときは spatial 系プロパティはダミー値で構わない。
+    ///  `model = Custom` 以外のとき `curve_index` は無視される。`curve_index = 0xFFFF_FFFF`
+    ///  は「未指定」を表すセンチネル (`CURVE_INDEX_NONE` 相当)。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaSpawnSpatialInit
+    {
+        /// <summary>
+        ///  0 = 2D ソース (旧 `set_spatial_enabled(0)` 相当) / 非 0 = 3D ソース。
+        /// </summary>
+        public byte enabled;
+        /// <summary>
+        ///  1 byte alignment padding。常に 0。
+        /// </summary>
+        public byte _pad0;
+        public ushort _pad1;
+        /// <summary>
+        ///  距離減衰モデル (`enabled = 0` のとき無視)。
+        /// </summary>
+        public NeziaAttenuationModel model;
+        public float min_distance;
+        public float max_distance;
+        public float rolloff;
+        /// <summary>
+        ///  `[0.0, 1.0]`。Unity `AudioSource.dopplerLevel` 互換。
+        /// </summary>
+        public float doppler_level;
+        /// <summary>
+        ///  `model = Custom` のときのみ参照。`0xFFFF_FFFF` で未指定。
+        /// </summary>
+        public uint curve_index;
     }
 
     /// <summary>
