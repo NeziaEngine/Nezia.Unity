@@ -367,6 +367,30 @@ namespace Nezia.Native
         internal static extern NeziaResult nezia_source_stop(NeziaEngine* engine, NeziaEntityId source);
 
         /// <summary>
+        ///  複数ソースを一括停止する（ステージ終端などの bulk stop 用）。
+        ///
+        ///  `nezia_source_stop` を N 回呼ぶと SPSC コマンドリングが詰まりやすい
+        ///  (容量 128) ため、`ids` を 1 コマンドあたり最大 `STOP_SOURCE_BATCH_MAX` (= 32) に
+        ///  詰めて送る。例: 256 voice → 8 コマンドに圧縮。
+        ///
+        ///  `out_processed` には実際に enqueue された ID 件数が書き込まれる
+        ///  (NULL 可)。`out_processed &lt; ids_len` のときはリング満杯で残りが送れて
+        ///  いないため、呼び出し側は次フレームに残りを再送するか
+        ///  `nezia_engine_stop_all` の利用を検討する。
+        ///
+        ///  戻り値:
+        ///  - `Ok`        : `ids_len` 件すべて enqueue 成功
+        ///  - `QueueFull` : 一部または全件が enqueue できなかった
+        ///  - `NullPointer`: `engine` が null、または `ids_len &gt; 0` で `ids_ptr` が null
+        ///
+        ///  # 安全性
+        ///  `ids_ptr` は `ids_len` 要素分の有効領域を指すこと。
+        ///  `out_processed` は NULL または有効な書き込み可能領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_source_stop_many", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_source_stop_many(NeziaEngine* engine, NeziaEntityId* ids_ptr, nuint ids_len, nuint* out_processed);
+
+        /// <summary>
         ///  複数ソースの位置を一括更新する（毎フレーム想定）。
         ///
         ///  # 安全性
