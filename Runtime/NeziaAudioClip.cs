@@ -108,10 +108,14 @@ namespace Nezia.Unity
 
         // ─── NeziaSoundAsset 実装 ────────────────────────────────
 
+        internal override bool SpawnAcousticsBundled => true;
+
         internal override unsafe NeziaEntityId Spawn(
             Nezia.Native.NeziaEngine* engine,
             float volume, float pitch,
             NeziaEntityId bus, bool looping,
+            byte nativePriority,
+            NeziaSpawnSpatialInit spatialInit,
             delegate* unmanaged[Cdecl]<void*, void> callback, void* userData)
         {
             var buffer = GetOrLoadBuffer();
@@ -120,7 +124,9 @@ namespace Nezia.Unity
 
             return LibNezia.nezia_source_play_with_handle(
                 engine, buffer.Id, volume, pitch, bus,
-                looping ? (byte)1 : (byte)0, callback, userData);
+                looping ? (byte)1 : (byte)0,
+                nativePriority, spatialInit,
+                callback, userData);
         }
 
         // ─── AudioClip 必須箇所への橋渡し ────────────────────────
