@@ -259,6 +259,10 @@ Inspector に再生ボタン・波形を出す。authoring 中の試聴は他の
   Unity 標準の `AudioClip` / `AudioSource` を使った代替再生も採用しない（実機との挙動乖離が出るため）。
 - したがってこのフェーズは **デーモン仕様が固まるまで本実装に入らない**。Editor 側に
   プレビュー API を露出する場合も、デーモン IPC への薄いラッパに留める。
+- **(2026-07 更新)** daemon 0.2.0 Tier 2 (LoadBuffer/Play/LoadMixer/Clip-centric/Container) が
+  nezia-core 側で完成し、本実装が解除された。Editor は `nezia-cli` を `Process` 起動して
+  stdout の 1 行 JSON を読むだけで、gRPC / protobuf / 音声バイナリに一切触れない
+  (nezia-core docs/design/cli/CONCEPT.md の front door 経路)。
 
 **含む（デーモン稼働後）:**
 - `NeziaAudioClip` Inspector: Play / Stop ボタン + メタデータ表示（波形は import 時にメタとして
@@ -518,7 +522,7 @@ Send 配線を専用 UI で編集できる。Buses タブは PR-A〜C のバス�
 | IP-3 Snapshot Asset | 完了 | #31 (PR-A), #32 (PR-B) |
 | **IP-4 Clip-centric 再設計** | **PR-A〜D 完了** | #33 (PR-A), #35 (PR-B), #36 (PR-C1), #37 (PR-C2), PR-D (samples + docs) |
 | IP-5 Source Effect Slot | IP-4 待ち | — |
-| IP-6 Asset Preview | デーモン依存により保留（バイナリ直接操作の実装路線は廃止） | — |
+| IP-6 Asset Preview | **PR-A 実装中** (daemon 0.2.0 完成により解除。nezia-cli 経由の Play/Stop/メタデータ) | — |
 | IP-7 PlayScheduled | 調査前 | — |
 | IP-8 Sound Dictionary | IP-4 待ち | — |
 | IP-9 Streaming Asset | IP-4 のルールに従って実装予定 | — |
