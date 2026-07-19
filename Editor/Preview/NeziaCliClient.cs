@@ -35,11 +35,45 @@ namespace Nezia.Unity.Editor.Preview
         internal static string ResolveDaemonPath() =>
             Resolve(DaemonPathPrefsKey, "nezia-daemon", "target/debug");
 
-        /// <summary>EditorPrefs へバイナリパスを保存する (Settings UI / HelpBox から使用)。</summary>
-        internal static void SetCliPath(string path) => EditorPrefs.SetString(CliPathPrefsKey, path);
+        // ─── メインスレッド解決結果のキャッシュ ─────────────────────
+        //
+        // ResolveCliPath / ResolveDaemonPath は EditorPrefs / Application /
+        // PackageInfo などメインスレッド専用 API に依存するため、バックグラウンド
+        // スレッドから直接呼ぶと "can only be called from the main thread" で落ちる。
+        // 非同期実行に入る前にメインスレッドで一度解決してここへ焼き、off-thread の
+        // Run / daemon spawn はこのキャッシュだけを参照する。
 
-        internal static void SetDaemonPath(string path) =>
+        private static string _cachedCliPath;
+        private static string _cachedDaemonPath;
+
+        /// <summary>解決済み cli パス (キャッシュ)。<see cref="CacheResolvedPaths"/> 後に有効。</summary>
+        internal static string CachedCliPath => _cachedCliPath;
+
+        /// <summary>解決済み daemon パス (キャッシュ)。<see cref="CacheResolvedPaths"/> 後に有効。</summary>
+        internal static string CachedDaemonPath => _cachedDaemonPath;
+
+        /// <summary>
+        /// cli / daemon パスをメインスレッドで解決してキャッシュする。非同期処理に
+        /// 入る前に必ずメインスレッドから呼ぶこと。
+        /// </summary>
+        internal static void CacheResolvedPaths()
+        {
+            _cachedCliPath = ResolveCliPath();
+            _cachedDaemonPath = ResolveDaemonPath();
+        }
+
+        /// <summary>EditorPrefs へバイナリパスを保存する (Settings UI / HelpBox から使用)。</summary>
+        internal static void SetCliPath(string path)
+        {
+            EditorPrefs.SetString(CliPathPrefsKey, path);
+            CacheResolvedPaths();
+        }
+
+        internal static void SetDaemonPath(string path)
+        {
             EditorPrefs.SetString(DaemonPathPrefsKey, path);
+            CacheResolvedPaths();
+        }
 
         private static string Resolve(string prefsKey, string binaryName, string devSubdir)
         {
@@ -123,7 +157,9 @@ namespace Nezia.Unity.Editor.Preview
         /// </summary>
         internal static Response Run(string arguments, int timeoutMs = DefaultTimeoutMs)
         {
-            var cli = ResolveCliPath();
+            // off-thread から呼ばれるためパス解決 (メインスレッド専用 API) はここでしない。
+            // 呼び出し側がメインスレッドで CacheResolvedPaths() 済みである前提。
+            var cli = _cachedCliPath;
             if (cli == null)
             {
                 return Fail("CLI_NOT_FOUND",

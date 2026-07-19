@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <!-- 既定のプロパティ描画をぶら下げるコンテナ (C# から FillDefaultInspector) -->
+    <ui:VisualElement name="default-inspector" />
+
+    <ui:VisualElement name="preview-section" class="preview__section">
+        <ui:Label text="Preview" class="preview__header" />
+        <ui:Label name="metadata" class="preview__meta" />
+
+        <ui:VisualElement name="transport" class="preview__transport">
+            <ui:Button name="play" text="▶ Play" class="preview__play" />
+            <ui:Button name="stop" text="■ Stop" class="preview__stop" />
+            <ui:Button name="stop-all" text="Stop All" class="preview__stop" />
+        </ui:VisualElement>
+
+        <ui:Label name="status" class="preview__status" />
+        <!-- HelpBox はこの Unity バージョンで UXML 非対応のため、C# 生成して差し込む -->
+        <ui:VisualElement name="error-slot" />
+
+        <ui:Button name="pick-cli" text="nezia-cli の場所を指定…" class="preview__pick" />
+        <ui:Button name="pick-daemon" text="nezia-daemon の場所を指定…" class="preview__pick" />
+    </ui:VisualElement>
+</ui:UXML>
