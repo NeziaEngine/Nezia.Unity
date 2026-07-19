@@ -393,6 +393,25 @@ namespace Nezia.Unity.Editor.Preview
 
         // ─── plan (メインスレッド) → execute (バックグラウンド) ───────
 
+        /// <summary>
+        /// この長さ (秒) 以上のクリップはストリーミングロードで試聴する。
+        ///
+        /// 根拠: 静的フルデコードは実測 ~45ms/秒 (debug daemon、M系 Mac)。非力な
+        /// マシンではこの数倍かかるため、配布パッケージの既定としては「最弱環境で
+        /// 初回クリックが 1 秒を超えない」側に倒して 5 秒とする。強いマシンでは
+        /// 静的でも速いのでどちらでも体感差はない。
+        /// 既知のトレードオフ: streaming はリング単一消費のため、同一クリップの
+        /// 連打試聴では前の発音が途切れて頭から鳴り直す (5〜10 秒帯のジングルで
+        /// 触れやすい)。試聴用途では許容とする。
+        /// </summary>
+        private const float StreamingThresholdSeconds = 5f;
+
+        /// <summary>
+        /// 長さ不明 (メタデータ欠落) 時のフォールバック: このサイズ以上でストリーミング
+        /// (エンコード済みサイズなので粗い判定。5 秒の WAV ≒ 1〜2MB 相当に整合)。
+        /// </summary>
+        private const long StreamingThresholdBytes = 2L * 1024 * 1024;
+
         /// <summary>再生に必要な情報をメインスレッドで確定させたプラン。</summary>
         private sealed class PlayPlan
         {
@@ -402,6 +421,14 @@ namespace Nezia.Unity.Editor.Preview
             public string ClipAssetPath;
             public string ClipAbsPath;
             public int ClipLoadTimeoutMs;
+
+            /// <summary>
+            /// 長尺クリップをストリーミングバッファでロードする (フルデコードなし・即応答)。
+            /// daemon が Play のたびに先頭シーク + ループ同期するため Editor 側の追加管理は不要。
+            /// Random Container の子は daemon の container play 経路が streaming の
+            /// シーク/ループ同期を持たないため、常に静的ロードする。
+            /// </summary>
+            public bool ClipStreaming;
 
             // container
             public string ContainerKey;
@@ -414,6 +441,27 @@ namespace Nezia.Unity.Editor.Preview
 
             /// <summary>開始時点の Stop 世代。ずれたら再生発行を中止する。</summary>
             public int StopGeneration;
+        }
+
+        /// <summary>
+        /// クリップをストリーミングロードすべきか (メインスレッドで判定)。
+        /// 長さがメタデータに焼かれていればそれを使い、欠落時 (総フレーム 0 の
+        /// 破損メタ等) はファイルサイズで代替判定する。
+        /// </summary>
+        private static bool ShouldStream(NeziaAudioClip clip, string absolutePath)
+        {
+            if (clip.Length > 0f)
+            {
+                return clip.Length >= StreamingThresholdSeconds;
+            }
+            try
+            {
+                return new FileInfo(absolutePath).Length >= StreamingThresholdBytes;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -466,7 +514,10 @@ namespace Nezia.Unity.Editor.Preview
                     plan.IsContainer = false;
                     plan.ClipAssetPath = path;
                     plan.ClipAbsPath = Path.GetFullPath(path);
-                    plan.ClipLoadTimeoutMs = LoadTimeoutFor(plan.ClipAbsPath);
+                    plan.ClipStreaming = ShouldStream(clip, plan.ClipAbsPath);
+                    // streaming はフルデコードしないため即応答する。timeout は既定で十分。
+                    plan.ClipLoadTimeoutMs =
+                        plan.ClipStreaming ? 10_000 : LoadTimeoutFor(plan.ClipAbsPath);
                     plan.ClipJson = NeziaPreviewJson.BuildClipJson(asset);
                     return plan;
                 }
@@ -544,7 +595,8 @@ namespace Nezia.Unity.Editor.Preview
 
         private static void ExecuteClip(PlayPlan plan)
         {
-            var buffer = EnsureBuffer(plan.ClipAssetPath, plan.ClipAbsPath, plan.ClipLoadTimeoutMs);
+            var buffer = EnsureBuffer(
+                plan.ClipAssetPath, plan.ClipAbsPath, plan.ClipLoadTimeoutMs, plan.ClipStreaming);
             if (buffer == null)
             {
                 return;
@@ -605,7 +657,8 @@ namespace Nezia.Unity.Editor.Preview
 
         // ─── リソース準備 (バックグラウンド) ───────────────────────
 
-        private static string EnsureBuffer(string assetPath, string absolutePath, int timeoutMs)
+        private static string EnsureBuffer(
+            string assetPath, string absolutePath, int timeoutMs, bool streaming)
         {
             lock (CacheLock)
             {
@@ -614,7 +667,8 @@ namespace Nezia.Unity.Editor.Preview
                     return cached;
                 }
             }
-            var response = NeziaCliClient.Run($"load \"{absolutePath}\"", timeoutMs);
+            var flags = streaming ? " --streaming" : string.Empty;
+            var response = NeziaCliClient.Run($"load \"{absolutePath}\"{flags}", timeoutMs);
             if (!response.ok)
             {
                 LastError = response.ErrorText;
@@ -642,7 +696,8 @@ namespace Nezia.Unity.Editor.Preview
             for (var i = 0; i < plan.Children.Count; i++)
             {
                 var (childPath, childAbs, timeoutMs) = plan.Children[i];
-                var buffer = EnsureBuffer(childPath, childAbs, timeoutMs);
+                // コンテナ子は常に静的ロード (PlayPlan.ClipStreaming の doc コメント参照)。
+                var buffer = EnsureBuffer(childPath, childAbs, timeoutMs, streaming: false);
                 if (buffer == null)
                 {
                     return null;
