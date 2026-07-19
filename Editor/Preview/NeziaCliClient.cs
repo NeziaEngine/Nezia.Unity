@@ -26,7 +26,7 @@ namespace Nezia.Unity.Editor.Preview
         /// <summary>
         /// nezia-cli のパスを解決する。優先順:
         /// 1. EditorPrefs (このマシンでの明示指定)
-        /// 2. パッケージ同梱 <c>Editor/Bin/{platform}/</c> (リリース配布経路)
+        /// 2. パッケージ同梱 <c>Editor/Bin~/{platform}/</c> (リリース配布経路)
         /// 3. 開発用フォールバック: プロジェクト隣接の nezia-core checkout
         /// </summary>
         internal static string ResolveCliPath() =>
@@ -88,7 +88,10 @@ namespace Nezia.Unity.Editor.Preview
                 return prefs;
             }
 
-            // パッケージ同梱 (Editor/Bin/{platform}/)。リリースパイプラインが配置する。
+            // パッケージ同梱 (Editor/Bin~/{platform}/)。リリースパイプラインが配置する。
+            // チルダフォルダは Unity のアセット DB から除外されるため .exe が
+            // PluginImporter に誤取り込みされない。resolvedPath ベースのファイル
+            // アクセスなのでアセット DB 外でも問題なく届く。
             var packageRoot = GetPackageRoot();
             if (packageRoot != null)
             {
@@ -98,9 +101,10 @@ namespace Nezia.Unity.Editor.Preview
                     RuntimePlatform.WindowsEditor => "Windows",
                     _ => "Linux",
                 };
-                var bundled = Path.Combine(packageRoot, "Editor", "Bin", platform, exe);
+                var bundled = Path.Combine(packageRoot, "Editor", "Bin~", platform, exe);
                 if (File.Exists(bundled))
                 {
+                    EnsureExecutable(bundled);
                     return bundled;
                 }
             }
@@ -121,6 +125,42 @@ namespace Nezia.Unity.Editor.Preview
             var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
                 typeof(NeziaCliClient).Assembly);
             return info?.resolvedPath;
+        }
+
+        /// <summary>exec bit 付与済みのパス (セッション内で chmod を繰り返さないため)。</summary>
+        private static readonly System.Collections.Generic.HashSet<string> ExecutableEnsured = new();
+
+        /// <summary>
+        /// Unix 系で同梱バイナリに実行権限を保証する。UPM の tarball 展開経路や
+        /// 一部のファイルコピーで exec bit が落ちることがあるための保険。
+        /// (git 経由は mode を保持するので通常は no-op。)
+        /// </summary>
+        private static void EnsureExecutable(string path)
+        {
+            if (Application.platform == RuntimePlatform.WindowsEditor)
+            {
+                return;
+            }
+            if (!ExecutableEnsured.Add(path))
+            {
+                return;
+            }
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "/bin/chmod",
+                    Arguments = $"+x \"{path}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using var p = Process.Start(psi);
+                p?.WaitForExit(2000);
+            }
+            catch
+            {
+                // 失敗しても Run 側の PROCESS_ERROR で表面化するのでここでは握る。
+            }
         }
 
         // ─── コマンド実行 ─────────────────────────────────────────
