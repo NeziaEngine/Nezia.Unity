@@ -522,7 +522,7 @@ Send 配線を専用 UI で編集できる。Buses タブは PR-A〜C のバス�
 | IP-3 Snapshot Asset | 完了 | #31 (PR-A), #32 (PR-B) |
 | **IP-4 Clip-centric 再設計** | **PR-A〜D 完了** | #33 (PR-A), #35 (PR-B), #36 (PR-C1), #37 (PR-C2), PR-D (samples + docs) |
 | IP-5 Source Effect Slot | IP-4 待ち | — |
-| IP-6 Asset Preview | **PR-A 実装中** (daemon 0.2.0 完成により解除。nezia-cli 経由の Play/Stop/メタデータ) | — |
+| **IP-6 Asset Preview** | **完了** (試聴 / streaming / Effects・Sends / 減衰カーブ / 波形 / バイナリ同梱) | #69 (PR-A: nezia-cli 経由の試聴 + UI Toolkit/UXML + 非同期/プリウォーム), #70 (長尺 streaming, core#59), #71 (Clip Effects/Sends 反映, core#60), #72 (Editor/Bin~ 同梱, core#61), #73 (減衰カーブ, core#62), #74 (波形表示, core#63) |
 | IP-7 PlayScheduled | 調査前 | — |
 | IP-8 Sound Dictionary | IP-4 待ち | — |
 | IP-9 Streaming Asset | IP-4 のルールに従って実装予定 | — |
