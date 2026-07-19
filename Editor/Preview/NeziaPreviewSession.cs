@@ -393,11 +393,24 @@ namespace Nezia.Unity.Editor.Preview
 
         // ─── plan (メインスレッド) → execute (バックグラウンド) ───────
 
-        /// <summary>この長さ (秒) 以上のクリップはストリーミングロードで試聴する。</summary>
-        private const float StreamingThresholdSeconds = 10f;
+        /// <summary>
+        /// この長さ (秒) 以上のクリップはストリーミングロードで試聴する。
+        ///
+        /// 根拠: 静的フルデコードは実測 ~45ms/秒 (debug daemon、M系 Mac)。非力な
+        /// マシンではこの数倍かかるため、配布パッケージの既定としては「最弱環境で
+        /// 初回クリックが 1 秒を超えない」側に倒して 5 秒とする。強いマシンでは
+        /// 静的でも速いのでどちらでも体感差はない。
+        /// 既知のトレードオフ: streaming はリング単一消費のため、同一クリップの
+        /// 連打試聴では前の発音が途切れて頭から鳴り直す (5〜10 秒帯のジングルで
+        /// 触れやすい)。試聴用途では許容とする。
+        /// </summary>
+        private const float StreamingThresholdSeconds = 5f;
 
-        /// <summary>長さ不明 (メタデータ欠落) 時のフォールバック: このサイズ以上でストリーミング。</summary>
-        private const long StreamingThresholdBytes = 4L * 1024 * 1024;
+        /// <summary>
+        /// 長さ不明 (メタデータ欠落) 時のフォールバック: このサイズ以上でストリーミング
+        /// (エンコード済みサイズなので粗い判定。5 秒の WAV ≒ 1〜2MB 相当に整合)。
+        /// </summary>
+        private const long StreamingThresholdBytes = 2L * 1024 * 1024;
 
         /// <summary>再生に必要な情報をメインスレッドで確定させたプラン。</summary>
         private sealed class PlayPlan
