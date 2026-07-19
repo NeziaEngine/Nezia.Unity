@@ -46,6 +46,13 @@ namespace Nezia.Unity.Editor.Preview
         private static readonly Dictionary<string, CachedContainer> ContainerCache = new();
 
         /// <summary>
+        /// アセットパス → 波形ピーク (cli `peaks` の結果)。<see cref="CacheLock"/> 保護。
+        /// 波形は Editor 機能なので FFI ではなく front door (cli/daemon) で計算する。
+        /// セッション内 1 回だけ計算し、再インポートで無効化される。
+        /// </summary>
+        private static readonly Dictionary<string, float[]> PeaksCache = new();
+
+        /// <summary>
         /// キャッシュ辞書のロック。背景スレッド (Execute) とメインスレッド
         /// (AssetPostprocessor による無効化) の両方から触るため必須。
         /// </summary>
@@ -250,6 +257,8 @@ namespace Nezia.Unity.Editor.Preview
             {
                 BufferCache.Clear();
                 ContainerCache.Clear();
+                // PeaksCache は daemon の状態に依存しない (ファイル内容のみ) ため
+                // daemon 入れ替えでは消さない。無効化は再インポート起点のみ。
             }
             _loadedMixerJson = null;
             _lastSource = null;
@@ -274,6 +283,7 @@ namespace Nezia.Unity.Editor.Preview
                 foreach (var path in assetPaths)
                 {
                     BufferCache.Remove(path);
+                    PeaksCache.Remove(path);
                 }
 
                 List<string> dead = null;
@@ -389,6 +399,66 @@ namespace Nezia.Unity.Editor.Preview
             _lastSource = null;
             NeziaCliClient.CacheResolvedPaths();
             NeziaCliClient.Run("stop --all", StopTimeoutMs);
+        }
+
+        /// <summary>波形ピークのビン数 (Inspector 波形表示の横解像度)。</summary>
+        private const int WaveformBins = 256;
+
+        /// <summary>
+        /// 波形ピークを非同期で取得する (cli `peaks` 経由、セッションキャッシュ付き)。
+        /// メインスレッドから呼ぶこと。完了時に <paramref name="onDone"/> を
+        /// メインスレッドで呼ぶ (失敗時は null)。busy 状態 (再生準備) とは独立で、
+        /// Play をブロックしない。
+        /// </summary>
+        internal static void GetPeaksAsync(string assetPath, Action<float[]> onDone)
+        {
+            lock (CacheLock)
+            {
+                if (PeaksCache.TryGetValue(assetPath, out var cached))
+                {
+                    onDone?.Invoke(cached);
+                    return;
+                }
+            }
+
+            CaptureMainContext();
+            NeziaCliClient.CacheResolvedPaths();
+            string absolutePath;
+            try
+            {
+                absolutePath = Path.GetFullPath(assetPath);
+            }
+            catch
+            {
+                onDone?.Invoke(null);
+                return;
+            }
+
+            Task.Run(() =>
+            {
+                float[] result = null;
+                try
+                {
+                    if (EnsureDaemon())
+                    {
+                        var response = NeziaCliClient.Run(
+                            $"peaks \"{absolutePath}\" --bins {WaveformBins}", 30_000);
+                        if (response.ok && response.peaks is { Length: > 0 })
+                        {
+                            result = response.peaks;
+                            lock (CacheLock)
+                            {
+                                PeaksCache[assetPath] = result;
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // 波形は装飾なので失敗を LastError に載せない (再生系を汚さない)。
+                }
+                PostToMain(() => onDone?.Invoke(result));
+            });
         }
 
         // ─── plan (メインスレッド) → execute (バックグラウンド) ───────

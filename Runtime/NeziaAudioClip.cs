@@ -23,13 +23,6 @@ namespace Nezia.Unity
         [SerializeField] internal int channels;
         [SerializeField] internal int totalSamples;
 
-        /// <summary>
-        /// import 時に焼き込んだ波形ピーク (等幅ビンごとの max |sample|、[0,1])。
-        /// Inspector の波形表示専用で、ランタイムでは参照しない。
-        /// 旧 import 資産では null / 空になり得る (表示側でプレースホルダ)。
-        /// </summary>
-        [SerializeField, HideInInspector] internal float[] waveformPeaks;
-
         // ネイティブの BufferId は (0, 0) も有効値 (最初に確保されるスロット) なので、
         // 「バッファをロード済みか」の判定を ID の sentinel 比較に頼らず、明示的な bool で持つ。
         // ネイティブエンジンが作り直されるとキャッシュした BufferId は無効になる。

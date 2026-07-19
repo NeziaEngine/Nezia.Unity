@@ -146,9 +146,10 @@ namespace Nezia.Unity.Editor.Preview
         }
 
         /// <summary>
-        /// 波形スロットへ描画要素を差し込む。ピークは import 時に焼き込まれた
-        /// メタデータ (<see cref="NeziaAudioClip.waveformPeaks"/>) で、Editor では
-        /// PCM を扱わない。旧 import 資産 (peaks 無し) はプレースホルダを出す。
+        /// 波形スロットへ描画要素を差し込む。ピークは cli `peaks` (daemon 経由) で
+        /// オンデマンド計算し、セッション内キャッシュする — 波形は Editor 機能
+        /// なので front door (柱3) に従い FFI ではなく cli 経路を使う。
+        /// Editor プロセスは PCM を扱わない (IP-6 方針)。
         /// Container 等の非クリップは波形自体を出さない。
         /// </summary>
         private void BindWaveform(VisualElement slot)
@@ -157,17 +158,36 @@ namespace Nezia.Unity.Editor.Preview
             {
                 return;
             }
-            var peaks = clip.waveformPeaks;
-            if (peaks is { Length: > 0 })
+            var assetPath = AssetDatabase.GetAssetPath(clip);
+            if (string.IsNullOrEmpty(assetPath))
             {
-                slot.Add(new NeziaWaveformElement(peaks));
+                return;
             }
-            else
+
+            var placeholder = new Label("波形を読み込み中…");
+            placeholder.AddToClassList("preview__waveform-placeholder");
+            slot.Add(placeholder);
+
+            NeziaPreviewSession.GetPeaksAsync(assetPath, peaks =>
             {
-                var placeholder = new Label("波形なし (再インポートで生成されます)");
-                placeholder.AddToClassList("preview__waveform-placeholder");
-                slot.Add(placeholder);
-            }
+                // Inspector が閉じられた後のコールバックは無視する
+                // (detached な VisualElement を触っても実害はないが無駄)。
+                if (slot.panel == null)
+                {
+                    return;
+                }
+                slot.Clear();
+                if (peaks is { Length: > 0 })
+                {
+                    slot.Add(new NeziaWaveformElement(peaks));
+                }
+                else
+                {
+                    var failed = new Label("波形なし (daemon 未到達)");
+                    failed.AddToClassList("preview__waveform-placeholder");
+                    slot.Add(failed);
+                }
+            });
         }
 
         private string MetadataText() => target switch

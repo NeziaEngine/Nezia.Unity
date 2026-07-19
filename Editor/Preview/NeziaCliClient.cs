@@ -136,6 +136,7 @@ namespace Nezia.Unity.Editor.Preview
             public string version;
             public int pid;
             public int port;
+            public float[] peaks;
             public Error error;
 
             [Serializable]
