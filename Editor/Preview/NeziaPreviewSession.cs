@@ -32,29 +32,69 @@ namespace Nezia.Unity.Editor.Preview
     /// </summary>
     internal static class NeziaPreviewSession
     {
-        /// <summary>アセットパス → ロード済み buffer handle。</summary>
+        /// <summary>アセットパス → ロード済み buffer handle。<see cref="CacheLock"/> 保護。</summary>
         private static readonly Dictionary<string, string> BufferCache = new();
 
-        /// <summary>コンテナアセットの GUID → container handle。</summary>
-        private static readonly Dictionary<string, string> ContainerCache = new();
+        /// <summary>daemon 上のコンテナ (handle + 子のアセットパス)。</summary>
+        private sealed class CachedContainer
+        {
+            public string Handle;
+            public string[] Children;
+        }
+
+        /// <summary>コンテナアセットのパス → キャッシュ。<see cref="CacheLock"/> 保護。</summary>
+        private static readonly Dictionary<string, CachedContainer> ContainerCache = new();
+
+        /// <summary>
+        /// キャッシュ辞書のロック。背景スレッド (Execute) とメインスレッド
+        /// (AssetPostprocessor による無効化) の両方から触るため必須。
+        /// </summary>
+        private static readonly object CacheLock = new();
 
         /// <summary>daemon にロード済みのミキサー構成 (JSON 全文で同一性を判定)。</summary>
-        private static string _loadedMixerJson;
+        private static volatile string _loadedMixerJson;
 
-        /// <summary>直近の再生 source handle (Stop ボタン用)。</summary>
-        private static string _lastSource;
+        /// <summary>直近の再生 source handle (Stop ボタン用)。クロススレッド読み書き。</summary>
+        private static volatile string _lastSource;
+
+        private static volatile string _lastError;
+        private static volatile string _statusText;
 
         /// <summary>直近のエラーメッセージ (Inspector 表示用)。null = 正常。</summary>
-        internal static string LastError { get; private set; }
+        internal static string LastError
+        {
+            get => _lastError;
+            private set => _lastError = value;
+        }
 
         /// <summary>実行中の状態表示 (「daemon 起動中…」等)。null = アイドル。</summary>
-        internal static string StatusText { get; private set; }
+        internal static string StatusText
+        {
+            get => _statusText;
+            private set => _statusText = value;
+        }
 
         /// <summary>再生準備 (daemon 起動 / ロード / 再生) が進行中か。UI のボタン抑止に使う。</summary>
         internal static bool IsBusy => _busy;
 
         private static volatile bool _busy;
         private static volatile bool _warming;
+
+        /// <summary>
+        /// Stop 世代。Stop / StopAll のたびにインクリメントされ、in-flight の再生準備は
+        /// 自分の開始時世代と一致しなくなった時点で再生発行を中止する。これが無いと
+        /// 「大型ファイルのロード中に Stop → ロード完了後に遅れて鳴り出す」が起きる。
+        /// </summary>
+        private static int _stopGeneration;
+
+        /// <summary>直近の daemon 起動失敗時刻 (NeziaCliClient.MonotonicMs)。失敗直後の連続再試行を抑止。</summary>
+        private static long _daemonFailAtTicks;
+
+        /// <summary>daemon 起動失敗後、再試行を控える時間 (ms)。</summary>
+        private const long DaemonRetryBackoffMs = 5000;
+
+        /// <summary>直近の cli 成功からこの時間 (ms) 以内なら生存確認 ping を省略する。</summary>
+        private const long PingSkipWindowMs = 3000;
 
         /// <summary>
         /// daemon 起動を直列化するロック。prewarm と Play が同時に走ると、prewarm が
@@ -108,7 +148,12 @@ namespace Nezia.Unity.Editor.Preview
                 }
                 finally
                 {
-                    SetStatus(null);
+                    // Play が進行中なら StatusText はその Play のもの。prewarm 側から
+                    // 消すと「ロード中…」等の表示が巻き添えでクリアされてしまう。
+                    if (!_busy)
+                    {
+                        SetStatus(null);
+                    }
                     _warming = false;
                 }
             });
@@ -129,9 +174,24 @@ namespace Nezia.Unity.Editor.Preview
 
         private static bool EnsureDaemonLocked()
         {
+            // 直近数秒以内に cli 成功があれば daemon は生きているとみなし、
+            // 生存確認 ping (プロセス spawn 1 回 ≒ 数十 ms) を省略する。
+            if (NeziaCliClient.MonotonicMs - NeziaCliClient.LastSuccessTicks < PingSkipWindowMs)
+            {
+                return true;
+            }
+
             if (NeziaCliClient.Run("ping", 2000).ok)
             {
                 return true;
+            }
+
+            // 起動失敗直後の再試行はフル起動シーケンス (~3 秒) を繰り返すだけなので、
+            // バックオフ時間内は即座に諦める (prewarm 失敗 → Play 失敗の連鎖を短縮)。
+            if (NeziaCliClient.MonotonicMs - _daemonFailAtTicks < DaemonRetryBackoffMs)
+            {
+                LastError ??= "daemon の起動に失敗しました。数秒後に再試行してください。";
+                return false;
             }
 
             SetStatus("daemon 起動中…");
@@ -141,6 +201,7 @@ namespace Nezia.Unity.Editor.Preview
             if (daemon == null)
             {
                 LastError = "nezia-daemon が見つかりません。パスを指定してください。";
+                _daemonFailAtTicks = NeziaCliClient.MonotonicMs;
                 return false;
             }
 
@@ -162,6 +223,7 @@ namespace Nezia.Unity.Editor.Preview
             catch (Exception e)
             {
                 LastError = $"daemon の起動に失敗: {e.Message}";
+                _daemonFailAtTicks = NeziaCliClient.MonotonicMs;
                 return false;
             }
 
@@ -173,19 +235,75 @@ namespace Nezia.Unity.Editor.Preview
                 {
                     // daemon が入れ替わったので旧ハンドルはすべて無効。
                     InvalidateCaches();
+                    _daemonFailAtTicks = 0;
                     return true;
                 }
             }
             LastError = "daemon が起動しましたが ping が通りません。";
+            _daemonFailAtTicks = NeziaCliClient.MonotonicMs;
             return false;
         }
 
         private static void InvalidateCaches()
         {
-            BufferCache.Clear();
-            ContainerCache.Clear();
+            lock (CacheLock)
+            {
+                BufferCache.Clear();
+                ContainerCache.Clear();
+            }
             _loadedMixerJson = null;
             _lastSource = null;
+        }
+
+        /// <summary>
+        /// 指定アセットに紐づく preview キャッシュを無効化する
+        /// (<see cref="NeziaPreviewCacheInvalidator"/> がメインスレッドから呼ぶ)。
+        /// これが無いと、音声ファイルの差し替え・再インポート後も daemon には
+        /// 旧デコード結果が残り、試聴だけ古い音が鳴り続ける。
+        /// コンテナは「自身が変更された」「子のどれかが変更された」の両方で無効化する。
+        ///
+        /// daemon 側の旧 buffer / container はここでは destroy しない
+        /// (メインスレッドを cli 呼び出しでブロックしないため)。孤児は daemon の
+        /// 寿命 (= Editor セッション) までの有限リークで、preview 用途では許容する。
+        /// </summary>
+        internal static void InvalidateAssets(List<string> assetPaths)
+        {
+            lock (CacheLock)
+            {
+                var set = new HashSet<string>(assetPaths);
+                foreach (var path in assetPaths)
+                {
+                    BufferCache.Remove(path);
+                }
+
+                List<string> dead = null;
+                foreach (var entry in ContainerCache)
+                {
+                    var hit = set.Contains(entry.Key);
+                    if (!hit)
+                    {
+                        foreach (var child in entry.Value.Children)
+                        {
+                            if (set.Contains(child))
+                            {
+                                hit = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (hit)
+                    {
+                        (dead ??= new List<string>()).Add(entry.Key);
+                    }
+                }
+                if (dead != null)
+                {
+                    foreach (var key in dead)
+                    {
+                        ContainerCache.Remove(key);
+                    }
+                }
+            }
         }
 
         // ─── 再生 (非同期) ─────────────────────────────────────────
@@ -219,6 +337,7 @@ namespace Nezia.Unity.Editor.Preview
             _busy = true;
             StatusText = "再生準備中…";
             _stateListener = onStateChanged;
+            plan.StopGeneration = Volatile.Read(ref _stopGeneration);
             onStateChanged?.Invoke();
 
             Task.Run(() =>
@@ -241,23 +360,35 @@ namespace Nezia.Unity.Editor.Preview
             });
         }
 
-        /// <summary>直近の preview ソースを停止する (即時・軽量なので同期のまま)。</summary>
+        /// <summary>
+        /// Stop 系共通のタイムアウト (ms)。stop はメインスレッドで同期実行するため、
+        /// daemon 応答不能時にデフォルト 10 秒も Editor を止めないよう短くする。
+        /// </summary>
+        private const int StopTimeoutMs = 2000;
+
+        /// <summary>
+        /// 直近の preview ソースを停止する。in-flight の再生準備 (ロード中など) も
+        /// 世代カウンタ経由でキャンセルされる (完了後に遅れて鳴り出さない)。
+        /// </summary>
         internal static void StopLast()
         {
-            if (_lastSource != null)
+            Interlocked.Increment(ref _stopGeneration);
+            var last = _lastSource;
+            if (last != null)
             {
-                NeziaCliClient.CacheResolvedPaths();
-                NeziaCliClient.Run($"stop {_lastSource}");
                 _lastSource = null;
+                NeziaCliClient.CacheResolvedPaths();
+                NeziaCliClient.Run($"stop {last}", StopTimeoutMs);
             }
         }
 
-        /// <summary>すべての preview 再生を停止する。</summary>
+        /// <summary>すべての preview 再生を停止する (in-flight の再生準備もキャンセル)。</summary>
         internal static void StopAll()
         {
-            NeziaCliClient.CacheResolvedPaths();
-            NeziaCliClient.Run("stop --all");
+            Interlocked.Increment(ref _stopGeneration);
             _lastSource = null;
+            NeziaCliClient.CacheResolvedPaths();
+            NeziaCliClient.Run("stop --all", StopTimeoutMs);
         }
 
         // ─── plan (メインスレッド) → execute (バックグラウンド) ───────
@@ -270,20 +401,51 @@ namespace Nezia.Unity.Editor.Preview
             // clip
             public string ClipAssetPath;
             public string ClipAbsPath;
+            public int ClipLoadTimeoutMs;
 
             // container
             public string ContainerKey;
-            public List<(string assetPath, string absPath)> Children;
+            public List<(string assetPath, string absPath, int timeoutMs)> Children;
 
             // common
             public string MixerJson;      // null = Master 直結
             public string ClipJson;       // clip のみ
             public string PlayArgsSuffix; // "--volume .. --pitch .. [--loop] [--bus ..]"
+
+            /// <summary>開始時点の Stop 世代。ずれたら再生発行を中止する。</summary>
+            public int StopGeneration;
+        }
+
+        /// <summary>
+        /// ファイルサイズに応じた load タイムアウト。巨大 BGM のフルデコード
+        /// (特に debug ビルドの daemon) は 30 秒では足りないことがある。
+        /// </summary>
+        private static int LoadTimeoutFor(string absolutePath)
+        {
+            try
+            {
+                var mb = new FileInfo(absolutePath).Length / (1024.0 * 1024.0);
+                return Mathf.Clamp(30_000 + (int)(mb * 3000), 30_000, 120_000);
+            }
+            catch
+            {
+                return 30_000;
+            }
         }
 
         /// <summary>メインスレッドで Unity API を叩き、以降スレッドセーフに扱えるプランへ落とす。</summary>
         private static PlayPlan BuildPlan(NeziaSoundAsset asset)
         {
+            // バス名は cli の引数文字列へ埋め込むため、引数列を壊す文字を先に弾く
+            // (エスケープはプラットフォーム別の引数パース規則差があるため、拒否が安全)。
+            var busName = asset.OutputBusName;
+            if (!string.IsNullOrEmpty(busName) && asset.OutputMixerAsset != null &&
+                busName.IndexOfAny(new[] { '"', '\\' }) >= 0)
+            {
+                LastError = $"バス名に使用できない文字 (\" または \\) が含まれています: {busName}";
+                return null;
+            }
+
             var mixer = asset.OutputMixerAsset;
             var plan = new PlayPlan
             {
@@ -304,13 +466,14 @@ namespace Nezia.Unity.Editor.Preview
                     plan.IsContainer = false;
                     plan.ClipAssetPath = path;
                     plan.ClipAbsPath = Path.GetFullPath(path);
+                    plan.ClipLoadTimeoutMs = LoadTimeoutFor(plan.ClipAbsPath);
                     plan.ClipJson = NeziaPreviewJson.BuildClipJson(asset);
                     return plan;
                 }
                 case NeziaRandomContainer container:
                 {
                     var key = AssetDatabase.GetAssetPath(container);
-                    var children = new List<(string, string)>();
+                    var children = new List<(string, string, int)>();
                     foreach (var child in container.Children)
                     {
                         switch (child)
@@ -322,7 +485,8 @@ namespace Nezia.Unity.Editor.Preview
                                     LastError = $"子クリップ ({clip.name}) のパスを解決できません。";
                                     return null;
                                 }
-                                children.Add((cp, Path.GetFullPath(cp)));
+                                var abs = Path.GetFullPath(cp);
+                                children.Add((cp, abs, LoadTimeoutFor(abs)));
                                 break;
                             case null:
                                 continue; // 空スロットはスキップ。
@@ -347,10 +511,18 @@ namespace Nezia.Unity.Editor.Preview
             }
         }
 
+        /// <summary>Stop 世代がずれた = 開始後に Stop が押された。</summary>
+        private static bool IsCancelled(PlayPlan plan) =>
+            plan.StopGeneration != Volatile.Read(ref _stopGeneration);
+
         /// <summary>プランをバックグラウンドで実行する (cli 呼び出しのみ)。</summary>
         private static void Execute(PlayPlan plan)
         {
             if (!EnsureDaemon())
+            {
+                return;
+            }
+            if (IsCancelled(plan))
             {
                 return;
             }
@@ -372,8 +544,14 @@ namespace Nezia.Unity.Editor.Preview
 
         private static void ExecuteClip(PlayPlan plan)
         {
-            var buffer = EnsureBuffer(plan.ClipAssetPath, plan.ClipAbsPath);
+            var buffer = EnsureBuffer(plan.ClipAssetPath, plan.ClipAbsPath, plan.ClipLoadTimeoutMs);
             if (buffer == null)
+            {
+                return;
+            }
+            // ロードは有用なので Stop 後も完了させてキャッシュするが、
+            // 再生発行だけは Stop の意図を尊重して中止する。
+            if (IsCancelled(plan))
             {
                 return;
             }
@@ -391,6 +569,10 @@ namespace Nezia.Unity.Editor.Preview
         {
             var handle = EnsureContainer(plan);
             if (handle == null)
+            {
+                return;
+            }
+            if (IsCancelled(plan))
             {
                 return;
             }
@@ -423,38 +605,50 @@ namespace Nezia.Unity.Editor.Preview
 
         // ─── リソース準備 (バックグラウンド) ───────────────────────
 
-        private static string EnsureBuffer(string assetPath, string absolutePath)
+        private static string EnsureBuffer(string assetPath, string absolutePath, int timeoutMs)
         {
-            if (BufferCache.TryGetValue(assetPath, out var cached))
+            lock (CacheLock)
             {
-                return cached;
+                if (BufferCache.TryGetValue(assetPath, out var cached))
+                {
+                    return cached;
+                }
             }
-            var response = NeziaCliClient.Run($"load \"{absolutePath}\"", 30_000);
+            var response = NeziaCliClient.Run($"load \"{absolutePath}\"", timeoutMs);
             if (!response.ok)
             {
                 LastError = response.ErrorText;
                 return null;
             }
-            BufferCache[assetPath] = response.buffer;
+            lock (CacheLock)
+            {
+                BufferCache[assetPath] = response.buffer;
+            }
             return response.buffer;
         }
 
         private static string EnsureContainer(PlayPlan plan)
         {
-            if (ContainerCache.TryGetValue(plan.ContainerKey, out var cached))
+            lock (CacheLock)
             {
-                return cached;
+                if (ContainerCache.TryGetValue(plan.ContainerKey, out var cached))
+                {
+                    return cached.Handle;
+                }
             }
 
             var buffers = new List<string>();
-            foreach (var (childPath, childAbs) in plan.Children)
+            var childPaths = new string[plan.Children.Count];
+            for (var i = 0; i < plan.Children.Count; i++)
             {
-                var buffer = EnsureBuffer(childPath, childAbs);
+                var (childPath, childAbs, timeoutMs) = plan.Children[i];
+                var buffer = EnsureBuffer(childPath, childAbs, timeoutMs);
                 if (buffer == null)
                 {
                     return null;
                 }
                 buffers.Add(buffer);
+                childPaths[i] = childPath;
             }
 
             var response = NeziaCliClient.Run($"container create {string.Join(" ", buffers)}");
@@ -463,7 +657,14 @@ namespace Nezia.Unity.Editor.Preview
                 LastError = response.ErrorText;
                 return null;
             }
-            ContainerCache[plan.ContainerKey] = response.container;
+            lock (CacheLock)
+            {
+                ContainerCache[plan.ContainerKey] = new CachedContainer
+                {
+                    Handle = response.container,
+                    Children = childPaths,
+                };
+            }
             return response.container;
         }
 
@@ -496,7 +697,9 @@ namespace Nezia.Unity.Editor.Preview
         {
             var dir = Path.Combine(Path.GetTempPath(), "nezia-preview");
             Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, $"{prefix}.json");
+            // Editor PID をファイル名に混ぜる: Unity を複数インスタンス起動した場合に
+            // 同じ temp ファイルを取り合って他プロジェクトのパラメータで鳴るのを防ぐ。
+            var path = Path.Combine(dir, $"{prefix}-{Process.GetCurrentProcess().Id}.json");
             File.WriteAllText(path, json);
             return path;
         }

@@ -151,6 +151,19 @@ namespace Nezia.Unity.Editor.Preview
         }
 
         /// <summary>
+        /// 単調増加のミリ秒時計 (<see cref="Stopwatch.GetTimestamp"/> ベース)。
+        /// Unity の .NET プロファイルには Environment.TickCount64 が無いため自前で持つ。
+        /// </summary>
+        internal static long MonotonicMs =>
+            Stopwatch.GetTimestamp() / (Stopwatch.Frequency / 1000);
+
+        /// <summary>
+        /// 直近に ok 応答を得た時刻 (<see cref="MonotonicMs"/>)。
+        /// 「数秒前に成功しているなら daemon 生存確認の ping を省略する」判定に使う。
+        /// </summary>
+        internal static long LastSuccessTicks { get; private set; }
+
+        /// <summary>
         /// cli を 1 コマンド実行して stdout の 1 行 JSON をパースする。
         /// 失敗 (バイナリ不在 / タイムアウト / パース不能) は ok=false の Response に畳む。
         /// port discovery は常に <c>--parent-pid {Editor の PID}</c> で行う
@@ -187,12 +200,17 @@ namespace Nezia.Unity.Editor.Preview
                 // (b) 読んでいない stderr のパイプが詰まると cli と相互デッドロックする
                 // の 2 つのハング経路があり、StopLast / StopAll 経由ではメインスレッドが
                 // 固まるため、WaitForExit(timeout) を唯一の待ち点にする。
-                var stdoutTask = process.StandardOutput.ReadToEndAsync();
-                var stderrTask = process.StandardError.ReadToEndAsync();
+                var stdoutTask = Observe(process.StandardOutput.ReadToEndAsync());
+                var stderrTask = Observe(process.StandardError.ReadToEndAsync());
 
                 if (!process.WaitForExit(timeoutMs))
                 {
                     try { process.Kill(); } catch { /* 既に終了 */ }
+                    // Kill 後にプロセス回収とパイプ排水を短時間だけ待つ。放置すると
+                    // ReadToEndAsync が宙に浮き unobserved task exception になり得る。
+                    try { process.WaitForExit(1000); } catch { /* 回収失敗は無視 */ }
+                    try { Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 500); }
+                    catch { /* 排水失敗・パイプ例外は無視 (Observe 済み) */ }
                     return Fail("TIMEOUT", $"nezia-cli {arguments} timed out ({timeoutMs}ms)");
                 }
 
@@ -212,12 +230,25 @@ namespace Nezia.Unity.Editor.Preview
                 {
                     return Fail("PARSE_ERROR", $"unparseable output: {line}");
                 }
+                if (response.ok)
+                {
+                    LastSuccessTicks = MonotonicMs;
+                }
                 return response;
             }
             catch (Exception e)
             {
                 return Fail("PROCESS_ERROR", e.Message);
             }
+        }
+
+        /// <summary>
+        /// タスクの例外を観測済みにしておく (fault 時の unobserved exception 化を防ぐ)。
+        /// </summary>
+        private static Task<string> Observe(Task<string> task)
+        {
+            task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            return task;
         }
 
         private static string FirstLine(string text)
