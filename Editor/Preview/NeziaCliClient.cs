@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 
@@ -180,14 +181,28 @@ namespace Nezia.Unity.Editor.Preview
             try
             {
                 using var process = Process.Start(psi);
-                var stdout = process.StandardOutput.ReadToEnd();
+
+                // stdout / stderr は非同期タスクで排水する。同期 ReadToEnd() だと
+                // (a) cli 無応答時にタイムアウトが効かず無限ブロックする
+                // (b) 読んでいない stderr のパイプが詰まると cli と相互デッドロックする
+                // の 2 つのハング経路があり、StopLast / StopAll 経由ではメインスレッドが
+                // 固まるため、WaitForExit(timeout) を唯一の待ち点にする。
+                var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                var stderrTask = process.StandardError.ReadToEndAsync();
+
                 if (!process.WaitForExit(timeoutMs))
                 {
                     try { process.Kill(); } catch { /* 既に終了 */ }
                     return Fail("TIMEOUT", $"nezia-cli {arguments} timed out ({timeoutMs}ms)");
                 }
 
-                var line = FirstLine(stdout);
+                // プロセス終了後はパイプが閉じるので短時間で完了する (保険の 1 秒上限)。
+                if (!Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 1000))
+                {
+                    return Fail("TIMEOUT", $"nezia-cli {arguments}: output drain timed out");
+                }
+
+                var line = FirstLine(stdoutTask.Result);
                 if (string.IsNullOrEmpty(line))
                 {
                     return Fail("EMPTY_OUTPUT", $"nezia-cli {arguments}: no output");
