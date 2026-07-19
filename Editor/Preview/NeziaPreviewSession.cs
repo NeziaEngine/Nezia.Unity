@@ -57,6 +57,17 @@ namespace Nezia.Unity.Editor.Preview
         private static volatile bool _warming;
 
         /// <summary>
+        /// daemon 起動を直列化するロック。prewarm と Play が同時に走ると、prewarm が
+        /// daemon を spawn している最中に Play 側の ping も失敗し、2 匹目の daemon を
+        /// spawn して二重に起動待ちする (プリウォームが無意味になり初回が最悪化する)。
+        /// バックグラウンドスレッド専用 (メインスレッドでは取らないので UI は固まらない)。
+        /// </summary>
+        private static readonly object DaemonGate = new();
+
+        /// <summary>進行中の再生の状態変化通知先 (StatusText 遷移のたびにメインスレッドで発火)。</summary>
+        private static Action _stateListener;
+
+        /// <summary>
         /// バックグラウンドスレッドから Editor メインスレッドへコールバックを戻すための
         /// <see cref="SynchronizationContext"/>。メインスレッドで呼ばれる API 側で捕捉する。
         /// </summary>
@@ -97,24 +108,33 @@ namespace Nezia.Unity.Editor.Preview
                 }
                 finally
                 {
-                    StatusText = null;
+                    SetStatus(null);
                     _warming = false;
                 }
             });
         }
 
         /// <summary>
-        /// daemon の起動を保証する。未起動なら Editor を親として spawn し、
-        /// ping が通るまで待つ (最大 ~3 秒)。スレッドプールから呼ばれる。
+        /// daemon の起動を保証する (直列化)。prewarm 進行中に Play が来た場合は
+        /// ここで prewarm の完了を待つだけで済み、2 匹目の spawn をしない。
+        /// スレッドプールから呼ばれる。
         /// </summary>
         private static bool EnsureDaemon()
+        {
+            lock (DaemonGate)
+            {
+                return EnsureDaemonLocked();
+            }
+        }
+
+        private static bool EnsureDaemonLocked()
         {
             if (NeziaCliClient.Run("ping", 2000).ok)
             {
                 return true;
             }
 
-            StatusText = "daemon 起動中…";
+            SetStatus("daemon 起動中…");
 
             // パスはメインスレッドでキャッシュ済み (ResolveDaemonPath を off-thread で呼ばない)。
             var daemon = NeziaCliClient.CachedDaemonPath;
@@ -198,6 +218,7 @@ namespace Nezia.Unity.Editor.Preview
 
             _busy = true;
             StatusText = "再生準備中…";
+            _stateListener = onStateChanged;
             onStateChanged?.Invoke();
 
             Task.Run(() =>
@@ -214,6 +235,7 @@ namespace Nezia.Unity.Editor.Preview
                 {
                     _busy = false;
                     StatusText = null;
+                    _stateListener = null;
                     PostToMain(onStateChanged);
                 }
             });
@@ -337,7 +359,7 @@ namespace Nezia.Unity.Editor.Preview
                 return;
             }
 
-            StatusText = "ロード中…";
+            SetStatus("ロード中…");
             if (plan.IsContainer)
             {
                 ExecuteContainer(plan);
@@ -482,6 +504,17 @@ namespace Nezia.Unity.Editor.Preview
         private static void CaptureMainContext()
         {
             _mainCtx ??= SynchronizationContext.Current;
+        }
+
+        /// <summary>
+        /// StatusText を更新し、進行中の再生があればメインスレッドへ状態変化を通知する。
+        /// これが無いと「daemon 起動中…」「ロード中…」の遷移が UI に届かず、
+        /// 初回コールドスタートの間ずっと「準備中」のままに見える。
+        /// </summary>
+        private static void SetStatus(string status)
+        {
+            StatusText = status;
+            PostToMain(_stateListener);
         }
 
         /// <summary>バックグラウンドスレッドからメインスレッドでコールバックを実行する。</summary>
