@@ -6,6 +6,8 @@
     <ui:VisualElement name="preview-section" class="preview__section">
         <ui:Label text="Preview" class="preview__header" />
         <ui:Label name="metadata" class="preview__meta" />
+        <!-- 波形は custom VisualElement (Painter2D 描画) を C# で差し込む -->
+        <ui:VisualElement name="waveform-slot" class="preview__waveform-slot" />
 
         <ui:VisualElement name="transport" class="preview__transport">
             <ui:Button name="play" text="▶ Play" class="preview__play" />
