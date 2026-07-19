@@ -108,9 +108,16 @@ namespace Nezia.Unity.Editor.Preview
 
         /// <summary>
         /// <see cref="NeziaSoundAsset"/> の音響デフォルトを ClipParams JSON へ変換する。
-        /// 適用対象: priority / spatial (SpatialBlend &gt; 0 のとき)。
-        /// Effects / Sends の preview 反映は後続 PR (bus 専用種別の検証と合わせて対応)。
+        /// 適用対象: priority / spatial (SpatialBlend &gt; 0 のとき) / effects / sends。
         /// カスタム減衰カーブは daemon 側未対応のため InverseDistance にフォールバックする。
+        ///
+        /// <para>
+        /// effects の注意: Source 直挿しの Reverb / Compressor は core のサウンド
+        /// スレッドが silently drop するため音に影響しない (実機 FFI 経路も同挙動)。
+        /// preview では送らずスキップし、警告ログで Aux Bus + Send への誘導を出す。
+        /// sends は宛先が Bus のもののみ対応 (Compressor sidechain は daemon proto
+        /// 未対応)。宛先 mixer が OutputMixerAsset と異なる send もロード外なのでスキップ。
+        /// </para>
         /// </summary>
         internal static string BuildClipJson(NeziaSoundAsset asset)
         {
@@ -137,8 +144,122 @@ namespace Nezia.Unity.Editor.Preview
                     .Append(F(UnityEngine.Mathf.Clamp01(asset.DopplerLevel)))
                     .Append('}');
             }
+
+            AppendClipEffects(sb, asset);
+            AppendClipSends(sb, asset);
+
             sb.Append('}');
             return sb.ToString();
+        }
+
+        /// <summary>Clip 起点の effect chain を ClipParams.effects へ出力する。</summary>
+        private static void AppendClipEffects(StringBuilder sb, NeziaSoundAsset asset)
+        {
+            var effects = asset.Effects;
+            if (effects == null || effects.Count == 0)
+            {
+                return;
+            }
+
+            var first = true;
+            foreach (var effect in effects)
+            {
+                if (effect == null)
+                {
+                    continue;
+                }
+                // Source 直の Reverb / Compressor は core が silently drop するため
+                // 送っても無意味 (実機でも鳴らない)。スロットを浪費しないよう送らない。
+                if (effect is NeziaSoundAsset.Reverb or NeziaSoundAsset.Compressor)
+                {
+                    UnityEngine.Debug.LogWarning(
+                        $"[Nezia] preview: {asset.name} の Source 直挿し {effect.Kind} は " +
+                        "core が Bus 専用のため適用されません (実機でも同様)。" +
+                        "Aux Bus + Send 経由を使ってください。");
+                    continue;
+                }
+                // Source 対象の Post-Spatial chain も core 未実装で silently drop される
+                // (audio_thread/effect.rs、Phase 2-3 の残課題)。SourceEffect の既定
+                // position が Post なので既定のままだと実機でも無音適用になる。
+                if (effect.position == NeziaEffectPosition.Post)
+                {
+                    UnityEngine.Debug.LogWarning(
+                        $"[Nezia] preview: {asset.name} の {effect.Kind} は position=Post のため " +
+                        "適用されません (Source の Post-Spatial は core 未実装、実機でも同様)。" +
+                        "Pre に変更してください。");
+                    continue;
+                }
+
+                sb.Append(first ? ",\"effects\":[" : ",");
+                first = false;
+                sb.Append("{\"position\":")
+                    .Append(ChainPosition(effect.position == NeziaEffectPosition.Pre))
+                    .Append(",\"enabled\":").Append(effect.enabled ? "true" : "false");
+                switch (effect)
+                {
+                    case NeziaSoundAsset.LowPass lp:
+                        sb.Append(",\"lowPass\":{\"cutoff\":").Append(F(lp.cutoff))
+                            .Append(",\"q\":").Append(F(lp.q)).Append('}');
+                        break;
+                    case NeziaSoundAsset.HighPass hp:
+                        sb.Append(",\"highPass\":{\"cutoff\":").Append(F(hp.cutoff))
+                            .Append(",\"q\":").Append(F(hp.q)).Append('}');
+                        break;
+                }
+                sb.Append('}');
+            }
+            if (!first)
+            {
+                sb.Append(']');
+            }
+        }
+
+        /// <summary>Clip 起点の Aux Send を ClipParams.sends へ出力する。</summary>
+        private static void AppendClipSends(StringBuilder sb, NeziaSoundAsset asset)
+        {
+            var sends = asset.Sends;
+            if (sends == null || sends.Count == 0)
+            {
+                return;
+            }
+
+            var first = true;
+            foreach (var send in sends)
+            {
+                if (send == null || string.IsNullOrEmpty(send.targetBus))
+                {
+                    continue;
+                }
+                if (send.target == NeziaMixerAsset.SendTargetKind.CompressorSidechain)
+                {
+                    UnityEngine.Debug.LogWarning(
+                        $"[Nezia] preview: {asset.name} の Compressor sidechain send は " +
+                        "preview 未対応のためスキップします (実機では有効)。");
+                    continue;
+                }
+                // preview daemon にロードされるのは OutputMixerAsset のみ。
+                // 別 mixer 宛の send はバス名解決できないのでスキップ。
+                var sendMixer = send.mixerAsset != null ? send.mixerAsset : asset.OutputMixerAsset;
+                if (sendMixer != asset.OutputMixerAsset || sendMixer == null)
+                {
+                    UnityEngine.Debug.LogWarning(
+                        $"[Nezia] preview: {asset.name} の send ({send.targetBus}) は " +
+                        "OutputMixerAsset と別の mixer 宛のため preview ではスキップします。");
+                    continue;
+                }
+
+                sb.Append(first ? ",\"sends\":[" : ",");
+                first = false;
+                sb.Append("{\"targetBus\":").Append(Quote(send.targetBus))
+                    .Append(",\"position\":")
+                    .Append(ChainPosition(send.position == NeziaSendPosition.Pre))
+                    .Append(",\"gain\":").Append(F(send.gain))
+                    .Append('}');
+            }
+            if (!first)
+            {
+                sb.Append(']');
+            }
         }
 
         // ─── ヘルパ ───────────────────────────────────────────────
