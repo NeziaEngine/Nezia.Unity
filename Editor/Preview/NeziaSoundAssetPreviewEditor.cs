@@ -50,8 +50,11 @@ namespace Nezia.Unity.Editor.Preview
             }
 
             // 既定のプロパティ描画 (import 済みアセットは read-only になる)。
-            InspectorElement.FillDefaultInspector(
-                root.Q<VisualElement>("default-inspector"), serializedObject, this);
+            // FillDefaultInspector は使わない: encodedBytes (mp3 生バイト列、BGM で
+            // 数百万要素) の foldout を開いた瞬間に全要素の PropertyField を作ろうと
+            // して Editor が 100% CPU で恒久フリーズするため、巨大配列だけ
+            // サマリ行に置き換えて描画する。
+            FillInspectorSkippingRawBytes(root.Q<VisualElement>("default-inspector"));
 
             BindPreview(root);
 
@@ -60,6 +63,47 @@ namespace Nezia.Unity.Editor.Preview
 
             return root;
         }
+
+        /// <summary>
+        /// デフォルト Inspector 相当を組み立てる。ただし <c>encodedBytes</c>
+        /// (インポート済み音声の生バイト列) は要素数が数百万に達し、UI Toolkit の
+        /// 配列 PropertyField 展開で Editor がフリーズするため、読み取り専用の
+        /// サイズ表示 1 行に置き換える。
+        /// </summary>
+        private void FillInspectorSkippingRawBytes(VisualElement container)
+        {
+            var prop = serializedObject.GetIterator();
+            if (!prop.NextVisible(enterChildren: true))
+            {
+                return;
+            }
+            do
+            {
+                if (prop.propertyPath == "encodedBytes")
+                {
+                    var bytes = prop.arraySize;
+                    container.Add(new Label($"Encoded Bytes    {FormatSize(bytes)}")
+                    {
+                        style = { opacity = 0.6f, marginLeft = 3, marginTop = 1, marginBottom = 1 },
+                    });
+                    continue;
+                }
+
+                var field = new PropertyField(prop);
+                if (prop.propertyPath == "m_Script")
+                {
+                    field.SetEnabled(false);
+                }
+                container.Add(field);
+            } while (prop.NextVisible(enterChildren: false));
+        }
+
+        private static string FormatSize(int bytes) => bytes switch
+        {
+            >= 1024 * 1024 => $"{bytes / (1024f * 1024f):0.0} MB",
+            >= 1024 => $"{bytes / 1024f:0.0} KB",
+            _ => $"{bytes} B",
+        };
 
         private void BindPreview(VisualElement root)
         {
