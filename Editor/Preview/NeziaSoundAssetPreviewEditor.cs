@@ -108,6 +108,7 @@ namespace Nezia.Unity.Editor.Preview
         private void BindPreview(VisualElement root)
         {
             root.Q<Label>("metadata").text = MetadataText();
+            BindWaveform(root.Q<VisualElement>("waveform-slot"));
 
             _playButton = root.Q<Button>("play");
             _playButton.clicked += OnPlayClicked;
@@ -142,6 +143,31 @@ namespace Nezia.Unity.Editor.Preview
             root.Q<VisualElement>("transport").SetEnabled(true);
 
             RefreshState();
+        }
+
+        /// <summary>
+        /// 波形スロットへ描画要素を差し込む。ピークは import 時に焼き込まれた
+        /// メタデータ (<see cref="NeziaAudioClip.waveformPeaks"/>) で、Editor では
+        /// PCM を扱わない。旧 import 資産 (peaks 無し) はプレースホルダを出す。
+        /// Container 等の非クリップは波形自体を出さない。
+        /// </summary>
+        private void BindWaveform(VisualElement slot)
+        {
+            if (target is not NeziaAudioClip clip)
+            {
+                return;
+            }
+            var peaks = clip.waveformPeaks;
+            if (peaks is { Length: > 0 })
+            {
+                slot.Add(new NeziaWaveformElement(peaks));
+            }
+            else
+            {
+                var placeholder = new Label("波形なし (再インポートで生成されます)");
+                placeholder.AddToClassList("preview__waveform-placeholder");
+                slot.Add(placeholder);
+            }
         }
 
         private string MetadataText() => target switch

@@ -16,6 +16,25 @@
     margin-bottom: 4px;
 }
 
+.preview__waveform-slot {
+    margin-bottom: 4px;
+}
+
+.preview__waveform {
+    height: 56px;
+    border-radius: 3px;
+    background-color: rgba(0, 0, 0, 0.22);
+}
+
+.preview__waveform-placeholder {
+    height: 56px;
+    border-radius: 3px;
+    background-color: rgba(0, 0, 0, 0.12);
+    -unity-text-align: middle-center;
+    font-size: 10px;
+    opacity: 0.5;
+}
+
 .preview__transport {
     flex-direction: row;
 }

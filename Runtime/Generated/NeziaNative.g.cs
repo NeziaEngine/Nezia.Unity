@@ -530,6 +530,21 @@ namespace Nezia.Native
         internal static extern NeziaResult nezia_audio_peek_metadata(byte* bytes_ptr, nuint bytes_len, NeziaAudioMetadata* out_metadata);
 
         /// <summary>
+        ///  メモリ上のバイト列から波形ピーク列を計算する (Editor の波形表示用)。
+        ///
+        ///  フルデコードした PCM を `bins` 個の等幅ビンへ分割し、各ビンの max |sample|
+        ///  (全チャンネル混合、[0, 1]) を `out_peaks_ptr` に書き込む。
+        ///  `nezia_audio_peek_metadata` と同じく `SoundEngine` インスタンス無しで呼べる。
+        ///  import 時に 1 度だけ実行して結果をアセットへ焼き込む用途を想定する。
+        ///
+        ///  # 安全性
+        ///  - `bytes_ptr` は `bytes_len` バイト読める有効な領域を指すこと。
+        ///  - `out_peaks_ptr` は `f32` を `bins` 個書ける有効な領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_audio_compute_peaks", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_audio_compute_peaks(byte* bytes_ptr, nuint bytes_len, float* out_peaks_ptr, nuint bins);
+
+        /// <summary>
         ///  バス / ソースのチェーン末尾にエフェクトを追加する。
         ///
         ///  戻り値: 有効な `NeziaEntityId` (= EffectId) または `INVALID`。
