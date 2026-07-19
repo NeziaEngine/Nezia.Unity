@@ -109,7 +109,8 @@ namespace Nezia.Unity.Editor.Preview
         /// <summary>
         /// <see cref="NeziaSoundAsset"/> の音響デフォルトを ClipParams JSON へ変換する。
         /// 適用対象: priority / spatial (SpatialBlend &gt; 0 のとき) / effects / sends。
-        /// カスタム減衰カーブは daemon 側未対応のため InverseDistance にフォールバックする。
+        /// AttenuationCurve 設定時は ATTENUATION_MODEL_CUSTOM + curve_points を出力する
+        /// (daemon 側 Nezia#62 対応。実機の「curve 優先」規則と同じ)。
         ///
         /// <para>
         /// effects の注意: Source 直挿しの Reverb / Compressor は core のサウンド
@@ -129,20 +130,37 @@ namespace Nezia.Unity.Editor.Preview
 
             if (asset.SpatialBlend > 0f)
             {
-                var model = asset.RolloffMode switch
-                {
-                    NeziaRolloffMode.None => "ATTENUATION_MODEL_NONE",
-                    NeziaRolloffMode.Linear => "ATTENUATION_MODEL_LINEAR",
-                    NeziaRolloffMode.Exponential => "ATTENUATION_MODEL_EXPONENTIAL",
-                    _ => "ATTENUATION_MODEL_INVERSE_DISTANCE",
-                };
+                // 実機と同じ優先順: AttenuationCurve 設定時は RolloffMode より curve が勝つ。
+                var curve = asset.AttenuationCurve;
+                var model = curve != null
+                    ? "ATTENUATION_MODEL_CUSTOM"
+                    : asset.RolloffMode switch
+                    {
+                        NeziaRolloffMode.None => "ATTENUATION_MODEL_NONE",
+                        NeziaRolloffMode.Linear => "ATTENUATION_MODEL_LINEAR",
+                        NeziaRolloffMode.Exponential => "ATTENUATION_MODEL_EXPONENTIAL",
+                        _ => "ATTENUATION_MODEL_INVERSE_DISTANCE",
+                    };
                 sb.Append(",\"spatial\":{\"model\":\"").Append(model).Append('"')
                     .Append(",\"minDistance\":").Append(F(asset.MinDistance))
                     .Append(",\"maxDistance\":").Append(F(asset.MaxDistance))
                     .Append(",\"rolloff\":1.0")
                     .Append(",\"dopplerLevel\":")
-                    .Append(F(UnityEngine.Mathf.Clamp01(asset.DopplerLevel)))
-                    .Append('}');
+                    .Append(F(UnityEngine.Mathf.Clamp01(asset.DopplerLevel)));
+                if (curve != null)
+                {
+                    // 正規化距離 0..1 等間隔の gain 制御点。daemon → core が
+                    // 64 サンプル LUT へ再サンプリングする。
+                    sb.Append(",\"curvePoints\":[");
+                    var pts = curve.SamplePoints();
+                    for (var i = 0; i < pts.Length; i++)
+                    {
+                        if (i > 0) sb.Append(',');
+                        sb.Append(F(pts[i]));
+                    }
+                    sb.Append(']');
+                }
+                sb.Append('}');
             }
 
             AppendClipEffects(sb, asset);

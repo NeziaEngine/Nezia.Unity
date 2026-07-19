@@ -44,11 +44,21 @@ namespace Nezia.Unity
         /// </summary>
         public NeziaAttenuationCurve ToNative()
         {
+            return NeziaAttenuationCurve.Create(SamplePoints());
+        }
+
+        /// <summary>
+        /// カーブを制御点配列へサンプリングする (engine 非依存)。
+        /// preview daemon への protojson (SpatialParams.curve_points) 出力など、
+        /// ネイティブハンドルを生成せずにカーブ形状だけ欲しい場合に使う。
+        /// </summary>
+        internal float[] SamplePoints()
+        {
             int n = Mathf.Max(2, _samples);
             var pts = new float[n];
             for (int i = 0; i < n; i++)
                 pts[i] = _curve.Evaluate(i / (float)(n - 1));
-            return NeziaAttenuationCurve.Create(pts);
+            return pts;
         }
     }
 }
