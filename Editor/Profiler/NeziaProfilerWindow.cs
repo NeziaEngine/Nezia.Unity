@@ -125,6 +125,8 @@ namespace Nezia.Unity.Editor.Profiler
             _sourcesList = root.Q<MultiColumnListView>("sources-list");
 
             ConfigureSourceColumns();
+            _sourcesList.selectionChanged += _ => PingSelectedSource();
+            _sourcesList.itemsChosen += _ => PingSelectedSource();
 
             root.schedule.Execute(Poll).Every(PollIntervalMs);
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
@@ -285,6 +287,32 @@ namespace Nezia.Unity.Editor.Profiler
             }
             _sourcesList.itemsSource = _sourceIndices;
             _sourcesList.RefreshItems();
+        }
+
+        /// <summary>
+        /// 選択中のソース行に対応する GameObject (NeziaAudioSource) を Hierarchy で
+        /// 選択 + ping する。PlayOneShot / container / preview 等、コンポーネントに
+        /// 紐付かないソースは対応先が無いため何もしない。
+        /// </summary>
+        private void PingSelectedSource()
+        {
+            var row = _sourcesList.selectedIndex;
+            if (row < 0 || row >= _sourceCount)
+            {
+                return;
+            }
+            var src = _sources[row];
+            foreach (var component in FindObjectsByType<NeziaAudioSource>(
+                         FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                var id = component.SpawnedSourceId;
+                if (id.index == src.Index && id.generation == src.Generation)
+                {
+                    Selection.activeGameObject = component.gameObject;
+                    EditorGUIUtility.PingObject(component.gameObject);
+                    return;
+                }
+            }
         }
 
         private void ConfigureSourceColumns()
