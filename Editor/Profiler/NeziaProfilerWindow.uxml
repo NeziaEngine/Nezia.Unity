@@ -38,14 +38,15 @@
         <ui:VisualElement class="profiler__section profiler__sources-section">
             <ui:Label name="sources-header" text="Sources" class="profiler__header" />
             <ui:MultiColumnListView name="sources-list" class="profiler__sources-list">
+                <!-- width は初期値。min-width を下限に stretchable でウィンドウ幅へ追従。 -->
                 <ui:Columns>
-                    <ui:Column name="id" title="ID" width="60" />
-                    <ui:Column name="clip" title="Clip" width="160" />
-                    <ui:Column name="bus" title="Bus" width="100" />
-                    <ui:Column name="state" title="State" width="80" />
-                    <ui:Column name="volume" title="Vol" width="50" />
-                    <ui:Column name="pitch" title="Pitch" width="50" />
-                    <ui:Column name="progress" title="Progress" width="170" />
+                    <ui:Column name="id" title="ID" width="60" min-width="50" stretchable="true" />
+                    <ui:Column name="clip" title="Clip" width="180" min-width="120" stretchable="true" />
+                    <ui:Column name="bus" title="Bus" width="110" min-width="80" stretchable="true" />
+                    <ui:Column name="state" title="State" width="90" min-width="70" stretchable="true" />
+                    <ui:Column name="volume" title="Vol" width="55" min-width="45" stretchable="true" />
+                    <ui:Column name="pitch" title="Pitch" width="55" min-width="45" stretchable="true" />
+                    <ui:Column name="progress" title="Progress" width="180" min-width="140" stretchable="true" />
                 </ui:Columns>
             </ui:MultiColumnListView>
         </ui:VisualElement>
