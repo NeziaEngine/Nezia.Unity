@@ -846,6 +846,73 @@ namespace Nezia.Native
         [DllImport(__DllName, EntryPoint = "nezia_engine_get_memory_stats", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern NeziaResult nezia_engine_get_memory_stats(NeziaEngine* engine, NeziaMemoryStatsC* out_stats);
 
+        /// <summary>
+        ///  プロファイラ publish の有効/無効を切り替える。
+        ///
+        ///  無効時のサウンドスレッド追加コストは atomic load 1 回のみ。
+        ///  可視化ウィンドウを開いている間だけ有効にする運用を想定する。
+        ///
+        ///  # 安全性
+        ///  - `engine` は `nezia_engine_new` が返した有効なポインタであること。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_profiler_set_enabled", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_profiler_set_enabled(NeziaEngine* engine, [MarshalAs(UnmanagedType.U1)] bool enabled);
+
+        /// <summary>
+        ///  最新のプロファイラフレームを取り込む (triple buffer update)。
+        ///
+        ///  以降の getter / copy はこの呼び出しで取り込んだフレームの値を返す。
+        ///  ポーリングごとに 1 回呼ぶこと。
+        ///
+        ///  # 安全性
+        ///  - `engine` は有効なポインタであること。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_profiler_update", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_profiler_update(NeziaEngine* engine);
+
+        /// <summary>
+        ///  直近フレームのマスター出力 peak (callback 内 max |sample|、soft limiter 後)。
+        ///
+        ///  # 安全性
+        ///  - `engine` は有効なポインタ、`out_left` / `out_right` は f32 を 1 個
+        ///    書ける有効な領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_profiler_master_peak", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_profiler_master_peak(NeziaEngine* engine, float* out_left, float* out_right);
+
+        /// <summary>
+        ///  直近フレームの Mixer Snapshot フェード進行 (サンプル)。
+        ///  `out_total` が 0 のときフェードは進行していない。
+        ///
+        ///  # 安全性
+        ///  - `engine` は有効なポインタ、`out_total` / `out_remaining` は u64 を 1 個
+        ///    書ける有効な領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_profiler_snapshot_progress", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern NeziaResult nezia_profiler_snapshot_progress(NeziaEngine* engine, ulong* out_total, ulong* out_remaining);
+
+        /// <summary>
+        ///  直近フレームの生存バスを呼び出し側配列へコピーする。
+        ///  戻り値は書き込んだ個数 (capacity 超過分は切り捨て)。
+        ///
+        ///  # 安全性
+        ///  - `engine` は有効なポインタ、`out_ptr` は `NeziaProfilerBus` を
+        ///    `capacity` 個書ける有効な領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_profiler_copy_buses", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern nuint nezia_profiler_copy_buses(NeziaEngine* engine, NeziaProfilerBus* out_ptr, nuint capacity);
+
+        /// <summary>
+        ///  直近フレームの生存ソースを呼び出し側配列へコピーする。
+        ///  戻り値は書き込んだ個数 (capacity 超過分は切り捨て)。
+        ///
+        ///  # 安全性
+        ///  - `engine` は有効なポインタ、`out_ptr` は `NeziaProfilerSource` を
+        ///    `capacity` 個書ける有効な領域を指すこと。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "nezia_profiler_copy_sources", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern nuint nezia_profiler_copy_sources(NeziaEngine* engine, NeziaProfilerSource* out_ptr, nuint capacity);
+
 
     }
 
@@ -1099,6 +1166,55 @@ namespace Nezia.Native
         public ulong buffers_bytes;
         public ulong effects_bytes;
         public ulong graph_bytes;
+    }
+
+    /// <summary>
+    ///  バス 1 本のプロファイル (core `ProfilerBus` と同内容の C ABI 形)。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaProfilerBus
+    {
+        public uint index;
+        public uint generation;
+        /// <summary>
+        ///  現在の線形ゲイン (Snapshot 補間中はその瞬間値)。
+        /// </summary>
+        public float gain;
+        /// <summary>
+        ///  0 = false / 1 = true。
+        /// </summary>
+        public byte muted;
+        public fixed byte _pad[3];
+    }
+
+    /// <summary>
+    ///  アクティブソース 1 本のプロファイル (core `ProfilerSource` の C ABI 形)。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct NeziaProfilerSource
+    {
+        public uint index;
+        public uint generation;
+        /// <summary>
+        ///  出力先バスの EntityId。無効時は index = u32::MAX。
+        /// </summary>
+        public uint bus_index;
+        public uint bus_generation;
+        public float volume;
+        public float pitch;
+        /// <summary>
+        ///  再生位置 (ソースフレーム、ピッチ換算前)。
+        /// </summary>
+        public float sample_offset;
+        /// <summary>
+        ///  0 = Stopped / 1 = Playing / 2 = Scheduled / 3 = Pausing。
+        /// </summary>
+        public byte state;
+        /// <summary>
+        ///  0 = false / 1 = true。
+        /// </summary>
+        public byte is_virtual;
+        public fixed byte _pad[2];
     }
 
 

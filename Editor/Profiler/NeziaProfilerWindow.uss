@@ -1,0 +1,121 @@
+.profiler__placeholder {
+    flex-grow: 1;
+    -unity-text-align: middle-center;
+    opacity: 0.5;
+}
+
+.profiler__content {
+    flex-grow: 1;
+    display: none;
+}
+
+.profiler__section {
+    margin: 6px 8px 0 8px;
+    padding-bottom: 6px;
+    border-bottom-width: 1px;
+    border-bottom-color: rgba(0, 0, 0, 0.25);
+}
+
+.profiler__sources-section {
+    flex-grow: 1;
+    border-bottom-width: 0;
+}
+
+.profiler__header {
+    -unity-font-style: bold;
+    margin-bottom: 4px;
+}
+
+.profiler__meter-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 2px;
+}
+
+.profiler__meter-label {
+    width: 16px;
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+.profiler__meter-track {
+    flex-grow: 1;
+    height: 12px;
+    border-radius: 2px;
+    background-color: rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+}
+
+.profiler__meter-fill {
+    height: 100%;
+    width: 0%;
+    background-color: rgb(96, 180, 100);
+}
+
+.profiler__meter-fill--hot {
+    background-color: rgb(214, 90, 74);
+}
+
+.profiler__meter-db {
+    width: 64px;
+    font-size: 10px;
+    -unity-text-align: middle-right;
+    opacity: 0.8;
+}
+
+.profiler__snapshot-row {
+    flex-direction: row;
+    align-items: center;
+    margin-top: 4px;
+}
+
+.profiler__snapshot-label {
+    width: 60px;
+}
+
+.profiler__snapshot-bar {
+    flex-grow: 1;
+}
+
+.profiler__bus-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 1px;
+}
+
+.profiler__bus-name {
+    width: 140px;
+    font-size: 11px;
+}
+
+.profiler__bus-gain-track {
+    flex-grow: 1;
+    height: 8px;
+    border-radius: 2px;
+    background-color: rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+}
+
+.profiler__bus-gain-fill {
+    height: 100%;
+    width: 0%;
+    background-color: rgb(90, 140, 200);
+}
+
+.profiler__bus-gain-value {
+    width: 52px;
+    font-size: 10px;
+    -unity-text-align: middle-right;
+    opacity: 0.8;
+}
+
+.profiler__bus-muted {
+    width: 30px;
+    font-size: 10px;
+    color: rgb(214, 90, 74);
+    -unity-text-align: middle-center;
+}
+
+.profiler__sources-list {
+    flex-grow: 1;
+}
