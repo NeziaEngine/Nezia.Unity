@@ -70,12 +70,19 @@ namespace Nezia.Unity.Editor.Profiler
         /// 遭遇したときだけ再スキャンする (PlayOneShot 等の後発ロードを拾うため)。
         /// </summary>
         private readonly Dictionary<uint, string> _bufferNames = new();
-        private bool _bufferNamesDirty = true;
+        /// <summary>このポーリング周期で既に全 Clip スキャンを実行したか (多重スキャン防止)。</summary>
+        private bool _bufferScannedThisPoll;
 
         /// <summary>バス行の UI キャッシュ (毎ポーリングで作り直さない)。</summary>
         private readonly List<BusRow> _busRowCache = new();
 
-        private bool _profilingActive;
+        /// <summary>
+        /// プロファイラ publish を有効化したエンジン世代 (<see cref="NeziaEngine.Generation"/>)。
+        /// 自前の bool フラグだと Enter Play Mode Options (Domain Reload なし) で静的が
+        /// セッションをまたいで残り、新エンジンに enable を呼び損ねる (「2 回目以降
+        /// 表示されない」)。エンジン世代が変わったら必ず再 enable する。
+        /// </summary>
+        private int _enabledGeneration = -1;
 
         private sealed class BusRow
         {
@@ -142,17 +149,16 @@ namespace Nezia.Unity.Editor.Profiler
         {
             if (change == PlayModeStateChange.ExitingPlayMode)
             {
-                // エンジンは play 終了で破棄されるため、フラグだけ畳む。
-                _profilingActive = false;
+                // エンジンは play 終了で破棄されるため、世代を無効化する。
+                _enabledGeneration = -1;
                 _busNames.Clear();
                 _bufferNames.Clear();
-                _bufferNamesDirty = true;
             }
         }
 
         private void DisableProfiling()
         {
-            if (_profilingActive && NeziaEngine.IsInitialized)
+            if (_enabledGeneration >= 0 && NeziaEngine.IsInitialized)
             {
                 try
                 {
@@ -163,7 +169,7 @@ namespace Nezia.Unity.Editor.Profiler
                     // engine 終了レースは無視 (可視化の後始末に失敗しても実害なし)。
                 }
             }
-            _profilingActive = false;
+            _enabledGeneration = -1;
         }
 
         // ─── ポーリング ───────────────────────────────────────────
@@ -175,14 +181,19 @@ namespace Nezia.Unity.Editor.Profiler
             SetVisible(_content, alive);
             if (!alive)
             {
-                _profilingActive = false;
+                _enabledGeneration = -1;
                 return;
             }
 
-            if (!_profilingActive)
+            // 新しいエンジン世代 (= 新しい Play セッション or 再初期化) では必ず
+            // FFI の enable を呼び直す。cached static ではなくエンジン実体に紐付ける。
+            var generation = NeziaEngine.Generation;
+            if (_enabledGeneration != generation)
             {
                 NeziaProfiler.Enabled = true;
-                _profilingActive = true;
+                _enabledGeneration = generation;
+                _busNames.Clear();
+                _bufferNames.Clear();
                 RebuildBusNameMap();
             }
 
@@ -279,6 +290,7 @@ namespace Nezia.Unity.Editor.Profiler
         {
             _sourceCount = NeziaProfiler.ReadSources(_sources);
             _sourcesHeader.text = $"Sources ({_sourceCount})";
+            _bufferScannedThisPoll = false;
 
             _sourceIndices.Clear();
             for (var i = 0; i < _sourceCount; i++)
@@ -389,18 +401,22 @@ namespace Nezia.Unity.Editor.Profiler
             {
                 return name;
             }
-            if (_bufferNamesDirty)
+            // 未知の index は 1 ポーリングにつき最大 1 回だけ全 Clip を再スキャン
+            // (後発ロードの取り込み)。それでも見つからなければアセット外バッファ
+            // (PlayOneShot / container の一時バッファ等) として "Buffer N" を
+            // キャッシュし、以降このセッションでは再スキャンしない (10Hz スキャン地獄回避)。
+            if (!_bufferScannedThisPoll)
             {
+                _bufferScannedThisPoll = true;
                 RebuildBufferNameMap();
-                _bufferNamesDirty = false;
                 if (_bufferNames.TryGetValue(bufferIndex, out name))
                 {
                     return name;
                 }
             }
-            // 次のポーリングで再スキャンさせる (後発ロードの取り込み)。
-            _bufferNamesDirty = true;
-            return $"Buffer {bufferIndex}";
+            name = $"Buffer {bufferIndex}";
+            _bufferNames[bufferIndex] = name;
+            return name;
         }
 
         private void RebuildBufferNameMap()
