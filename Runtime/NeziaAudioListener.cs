@@ -40,7 +40,11 @@ namespace Nezia.Unity
 
         internal static unsafe void PushActiveListener()
         {
-            if (s_active == null) return;
+            // エンジン未初期化 / 破棄済みなら何もしない。Play 終了時のティアダウンで
+            // エンジンが先に破棄され、リスナー / pump がまだ生きているフレームがあり、
+            // その際 RequireHandle() が throw するのを防ぐ (PollEvents / Flush と同じ
+            // ガード方針に揃える)。
+            if (s_active == null || !NeziaEngine.IsInitialized) return;
             var t = s_active.transform;
             var p = t.position;
             var f = t.forward;
