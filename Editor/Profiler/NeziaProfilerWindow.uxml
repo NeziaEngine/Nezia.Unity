@@ -43,9 +43,9 @@
                     <ui:Column name="clip" title="Clip" width="160" />
                     <ui:Column name="bus" title="Bus" width="100" />
                     <ui:Column name="state" title="State" width="80" />
-                    <ui:Column name="volume" title="Vol" width="55" />
-                    <ui:Column name="pitch" title="Pitch" width="55" />
-                    <ui:Column name="offset" title="Offset (s)" width="80" />
+                    <ui:Column name="volume" title="Vol" width="50" />
+                    <ui:Column name="pitch" title="Pitch" width="50" />
+                    <ui:Column name="progress" title="Progress" width="170" />
                 </ui:Columns>
             </ui:MultiColumnListView>
         </ui:VisualElement>

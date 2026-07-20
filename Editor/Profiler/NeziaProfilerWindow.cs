@@ -64,12 +64,20 @@ namespace Nezia.Unity.Editor.Profiler
         /// <summary>バス EntityId → 論理名 (NeziaSettings の DefaultMixer から解決)。</summary>
         private readonly Dictionary<(uint, uint), string> _busNames = new();
 
+        /// <summary>クリップのメタ (名前 / 長さ秒 / サンプルレート)。</summary>
+        private struct ClipMeta
+        {
+            public string Name;
+            public float Length;   // 秒。0 = 不明 (streaming / 非アセット)。
+            public int SampleRate; // 0 = 不明。
+        }
+
         /// <summary>
-        /// バッファプールスロット index → クリップ名。ロード済み
+        /// バッファプールスロット index → クリップメタ。ロード済み
         /// <see cref="NeziaAudioClip"/> の BufferId から逆引きする。未知の index に
         /// 遭遇したときだけ再スキャンする (PlayOneShot 等の後発ロードを拾うため)。
         /// </summary>
-        private readonly Dictionary<uint, string> _bufferNames = new();
+        private readonly Dictionary<uint, ClipMeta> _bufferMeta = new();
         /// <summary>このポーリング周期で既に全 Clip スキャンを実行したか (多重スキャン防止)。</summary>
         private bool _bufferScannedThisPoll;
 
@@ -152,7 +160,7 @@ namespace Nezia.Unity.Editor.Profiler
                 // エンジンは play 終了で破棄されるため、世代を無効化する。
                 _enabledGeneration = -1;
                 _busNames.Clear();
-                _bufferNames.Clear();
+                _bufferMeta.Clear();
             }
         }
 
@@ -193,7 +201,7 @@ namespace Nezia.Unity.Editor.Profiler
                 NeziaProfiler.Enabled = true;
                 _enabledGeneration = generation;
                 _busNames.Clear();
-                _bufferNames.Clear();
+                _bufferMeta.Clear();
                 RebuildBusNameMap();
             }
 
@@ -330,7 +338,7 @@ namespace Nezia.Unity.Editor.Profiler
         private void ConfigureSourceColumns()
         {
             SetupColumn("id", i => $"{_sources[i].Index}-{_sources[i].Generation}");
-            SetupColumn("clip", i => ResolveClipName(_sources[i].BufferIndex));
+            SetupColumn("clip", i => ResolveClipMeta(_sources[i].BufferIndex).Name);
             SetupColumn("bus", i => ResolveBusName(_sources[i].BusIndex, _sources[i].BusGeneration));
             SetupColumn("state", i =>
             {
@@ -340,11 +348,7 @@ namespace Nezia.Unity.Editor.Profiler
             });
             SetupColumn("volume", i => $"{_sources[i].Volume:0.00}");
             SetupColumn("pitch", i => $"{_sources[i].Pitch:0.00}");
-            SetupColumn("offset", i =>
-            {
-                var sr = NeziaEngine.OutputSampleRate;
-                return sr > 0 ? $"{_sources[i].SampleOffset / sr:0.00}" : "-";
-            });
+            SetupProgressColumn("progress");
         }
 
         private void SetupColumn(string name, System.Func<int, string> format)
@@ -355,6 +359,41 @@ namespace Nezia.Unity.Editor.Profiler
             {
                 var i = (int)_sourcesList.itemsSource[row];
                 ((Label)element).text = format(i);
+            };
+        }
+
+        /// <summary>
+        /// 再生位置カラム。経過 / 全長 (秒) を ProgressBar で表示する。
+        /// 経過秒はソースのサンプルレートで換算する (デバイスレートではない)。
+        /// 全長不明 (streaming / 非アセット) のときは経過秒だけ表示しバーは空。
+        /// </summary>
+        private void SetupProgressColumn(string name)
+        {
+            var column = _sourcesList.columns[name];
+            column.makeCell = () =>
+            {
+                var bar = new ProgressBar { lowValue = 0f, highValue = 1f };
+                bar.style.marginTop = 2;
+                bar.style.marginBottom = 2;
+                return bar;
+            };
+            column.bindCell = (element, row) =>
+            {
+                var i = (int)_sourcesList.itemsSource[row];
+                var bar = (ProgressBar)element;
+                var meta = ResolveClipMeta(_sources[i].BufferIndex);
+                var sr = meta.SampleRate > 0 ? meta.SampleRate : (int)NeziaEngine.OutputSampleRate;
+                var elapsed = sr > 0 ? _sources[i].SampleOffset / sr : 0f;
+                if (meta.Length > 0f)
+                {
+                    bar.value = Mathf.Clamp01(elapsed / meta.Length);
+                    bar.title = $"{elapsed:0.00} / {meta.Length:0.00}s";
+                }
+                else
+                {
+                    bar.value = 0f;
+                    bar.title = $"{elapsed:0.00}s";
+                }
             };
         }
 
@@ -395,11 +434,11 @@ namespace Nezia.Unity.Editor.Profiler
         /// 未知の index はスキャンをやり直し、それでも不明なら "Buffer N" 表示
         /// (バイト列直ロードやストリーミング等、アセット外バッファ)。
         /// </summary>
-        private string ResolveClipName(uint bufferIndex)
+        private ClipMeta ResolveClipMeta(uint bufferIndex)
         {
-            if (_bufferNames.TryGetValue(bufferIndex, out var name))
+            if (_bufferMeta.TryGetValue(bufferIndex, out var meta))
             {
-                return name;
+                return meta;
             }
             // 未知の index は 1 ポーリングにつき最大 1 回だけ全 Clip を再スキャン
             // (後発ロードの取り込み)。それでも見つからなければアセット外バッファ
@@ -408,25 +447,31 @@ namespace Nezia.Unity.Editor.Profiler
             if (!_bufferScannedThisPoll)
             {
                 _bufferScannedThisPoll = true;
-                RebuildBufferNameMap();
-                if (_bufferNames.TryGetValue(bufferIndex, out name))
+                RebuildBufferMetaMap();
+                if (_bufferMeta.TryGetValue(bufferIndex, out meta))
                 {
-                    return name;
+                    return meta;
                 }
             }
-            name = $"Buffer {bufferIndex}";
-            _bufferNames[bufferIndex] = name;
-            return name;
+            meta = new ClipMeta { Name = $"Buffer {bufferIndex}", Length = 0f, SampleRate = 0 };
+            _bufferMeta[bufferIndex] = meta;
+            return meta;
         }
 
-        private void RebuildBufferNameMap()
+        private void RebuildBufferMetaMap()
         {
-            _bufferNames.Clear();
+            // "Buffer N" フォールバックのキャッシュは残す (非アセット判定の再スキャン
+            // 抑止)。アセット由来のメタだけ最新化する。
             foreach (var clip in Resources.FindObjectsOfTypeAll<NeziaAudioClip>())
             {
                 if (clip.TryGetLoadedBufferIndex(out var index))
                 {
-                    _bufferNames[index] = clip.name;
+                    _bufferMeta[index] = new ClipMeta
+                    {
+                        Name = clip.name,
+                        Length = clip.Length,
+                        SampleRate = clip.SampleRate,
+                    };
                 }
             }
         }
