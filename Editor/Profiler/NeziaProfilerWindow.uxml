@@ -39,8 +39,9 @@
             <ui:Label name="sources-header" text="Sources" class="profiler__header" />
             <ui:MultiColumnListView name="sources-list" class="profiler__sources-list">
                 <ui:Columns>
-                    <ui:Column name="id" title="ID" width="70" />
-                    <ui:Column name="bus" title="Bus" width="110" />
+                    <ui:Column name="id" title="ID" width="60" />
+                    <ui:Column name="clip" title="Clip" width="160" />
+                    <ui:Column name="bus" title="Bus" width="100" />
                     <ui:Column name="state" title="State" width="80" />
                     <ui:Column name="volume" title="Vol" width="55" />
                     <ui:Column name="pitch" title="Pitch" width="55" />

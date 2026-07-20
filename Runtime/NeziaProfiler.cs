@@ -43,6 +43,8 @@ namespace Nezia.Unity
             /// <summary>出力先バスの EntityId。無効時は Index = uint.MaxValue。</summary>
             public uint BusIndex;
             public uint BusGeneration;
+            /// <summary>再生中バッファのプールスロット index (クリップ逆引き用)。</summary>
+            public uint BufferIndex;
             public float Volume;
             public float Pitch;
             /// <summary>再生位置 (ソースフレーム、ピッチ換算前)。</summary>
@@ -153,6 +155,7 @@ namespace Nezia.Unity
                     Generation = native[i].generation,
                     BusIndex = native[i].bus_index,
                     BusGeneration = native[i].bus_generation,
+                    BufferIndex = native[i].buffer_index,
                     Volume = native[i].volume,
                     Pitch = native[i].pitch,
                     SampleOffset = native[i].sample_offset,

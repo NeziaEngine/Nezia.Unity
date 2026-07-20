@@ -1200,6 +1200,10 @@ namespace Nezia.Native
         /// </summary>
         public uint bus_index;
         public uint bus_generation;
+        /// <summary>
+        ///  再生中バッファのプールスロット index (`BufferId.index`)。
+        /// </summary>
+        public uint buffer_index;
         public float volume;
         public float pitch;
         /// <summary>

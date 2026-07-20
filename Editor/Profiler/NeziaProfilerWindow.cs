@@ -64,6 +64,14 @@ namespace Nezia.Unity.Editor.Profiler
         /// <summary>バス EntityId → 論理名 (NeziaSettings の DefaultMixer から解決)。</summary>
         private readonly Dictionary<(uint, uint), string> _busNames = new();
 
+        /// <summary>
+        /// バッファプールスロット index → クリップ名。ロード済み
+        /// <see cref="NeziaAudioClip"/> の BufferId から逆引きする。未知の index に
+        /// 遭遇したときだけ再スキャンする (PlayOneShot 等の後発ロードを拾うため)。
+        /// </summary>
+        private readonly Dictionary<uint, string> _bufferNames = new();
+        private bool _bufferNamesDirty = true;
+
         /// <summary>バス行の UI キャッシュ (毎ポーリングで作り直さない)。</summary>
         private readonly List<BusRow> _busRowCache = new();
 
@@ -135,6 +143,8 @@ namespace Nezia.Unity.Editor.Profiler
                 // エンジンは play 終了で破棄されるため、フラグだけ畳む。
                 _profilingActive = false;
                 _busNames.Clear();
+                _bufferNames.Clear();
+                _bufferNamesDirty = true;
             }
         }
 
@@ -280,6 +290,7 @@ namespace Nezia.Unity.Editor.Profiler
         private void ConfigureSourceColumns()
         {
             SetupColumn("id", i => $"{_sources[i].Index}-{_sources[i].Generation}");
+            SetupColumn("clip", i => ResolveClipName(_sources[i].BufferIndex));
             SetupColumn("bus", i => ResolveBusName(_sources[i].BusIndex, _sources[i].BusGeneration));
             SetupColumn("state", i =>
             {
@@ -334,6 +345,44 @@ namespace Nezia.Unity.Editor.Profiler
                 if (bus.IsValid)
                 {
                     _busNames[(bus.Id.index, bus.Id.generation)] = node.name;
+                }
+            }
+        }
+
+        /// <summary>
+        /// バッファプールスロット index からクリップ名を解決する。ロード済みの
+        /// 全 NeziaAudioClip (アセット) をスキャンして対応表を作る。
+        /// 未知の index はスキャンをやり直し、それでも不明なら "Buffer N" 表示
+        /// (バイト列直ロードやストリーミング等、アセット外バッファ)。
+        /// </summary>
+        private string ResolveClipName(uint bufferIndex)
+        {
+            if (_bufferNames.TryGetValue(bufferIndex, out var name))
+            {
+                return name;
+            }
+            if (_bufferNamesDirty)
+            {
+                RebuildBufferNameMap();
+                _bufferNamesDirty = false;
+                if (_bufferNames.TryGetValue(bufferIndex, out name))
+                {
+                    return name;
+                }
+            }
+            // 次のポーリングで再スキャンさせる (後発ロードの取り込み)。
+            _bufferNamesDirty = true;
+            return $"Buffer {bufferIndex}";
+        }
+
+        private void RebuildBufferNameMap()
+        {
+            _bufferNames.Clear();
+            foreach (var clip in Resources.FindObjectsOfTypeAll<NeziaAudioClip>())
+            {
+                if (clip.TryGetLoadedBufferIndex(out var index))
+                {
+                    _bufferNames[index] = clip.name;
                 }
             }
         }
