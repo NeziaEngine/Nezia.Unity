@@ -127,10 +127,10 @@ Wwise/FMOD 流の Clip-centric を貫きつつ、`NeziaAudioSource` を Unity �
 
 | 機能 | 状況 | 区分 |
 |---|---|---|
-| 現在のバスツリー閲覧 | ✕ | 未実装 |
-| アクティブソース一覧 | ✕ | 未実装 |
-| マスター出力波形 / dB メーター | ✕ (Capture API は出ている) | 未実装 |
-| Snapshot 進行可視化 | ✕ | 未実装 |
+| 現在のバスツリー閲覧 | △ (gain / mute のフラット一覧) | 親子 + 名前解決が未実装 |
+| アクティブソース一覧 | ○ (Clip 名 / volume / pitch / 再生進捗 / GameObject 選択) | position / Override 表示が未実装 |
+| マスター出力波形 / dB メーター | ○ (L/R peak dB) | 済 |
+| Snapshot 進行可視化 | ○ | 済 |
 
 ---
 
@@ -526,7 +526,7 @@ Send 配線を専用 UI で編集できる。Buses タブは PR-A〜C のバス�
 | IP-7 PlayScheduled | 調査前 | — |
 | IP-8 Sound Dictionary | IP-4 待ち | — |
 | IP-9 Streaming Asset | IP-4 のルールに従って実装予定 | — |
-| IP-10 Mixer Inspector | 未着手 | — |
+| **IP-10 Mixer Inspector** | **基盤完了** (`Tools > Nezia > Profiler`: master dB / Snapshot 進行 / バス / ソース)。残: バスツリー・position / Override | #76 (core#65) |
 | IP-11 その他軽微 | 未着手 | — |
 
 各フェーズ着手時に PR 番号を埋める。
