@@ -83,6 +83,12 @@ namespace Nezia.Unity
             new NeziaEntityId { index = uint.MaxValue, generation = 0 };
 
         private NeziaEntityId _spawnedSource = InvalidEntityId;
+
+        /// <summary>
+        /// 現在 spawn 中のネイティブソースハンドル (プロファイラの行 → GameObject
+        /// 逆引き用)。未再生時は index = uint.MaxValue。
+        /// </summary>
+        internal NeziaEntityId SpawnedSourceId => _spawnedSource;
         private bool _isPlaying;
         private bool _isPaused;
 

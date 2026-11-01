@@ -33,6 +33,27 @@ namespace Nezia.Unity
         // 一度しか初期化されないため、この判定は不要なので #if UNITY_EDITOR で除外する。
         private NeziaBuffer _buffer;
         private bool _bufferLoaded;
+
+        /// <summary>
+        /// ロード済みネイティブバッファのプールスロット index を返す (プロファイラの
+        /// クリップ名逆引き用)。未ロード / 旧エンジン世代のキャッシュなら false。
+        /// </summary>
+        internal bool TryGetLoadedBufferIndex(out uint bufferIndex)
+        {
+            bufferIndex = 0;
+#if UNITY_EDITOR
+            if (_bufferLoaded && _bufferGeneration != NeziaEngine.Generation)
+            {
+                return false;
+            }
+#endif
+            if (!_bufferLoaded || !_buffer.IsValid)
+            {
+                return false;
+            }
+            bufferIndex = _buffer.Id.index;
+            return true;
+        }
 #if UNITY_EDITOR
         private int _bufferGeneration;
 #endif
